@@ -1,0 +1,146 @@
+:root {
+  color-scheme: dark;
+  --bg: #101318;
+  --card: #181d24;
+  --border: #2a323d;
+  --text: #e6e9ee;
+  --muted: #8b95a3;
+  --accent: #4f8cff;
+  --ok: #3fb96f;
+  --warn: #d9a13c;
+  --err: #e05c5c;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+header h1 { font-size: 20px; margin: 0; }
+header .sub { color: var(--muted); font-size: 13px; font-weight: normal; margin-left: 8px; }
+.health { font-size: 13px; color: var(--muted); }
+.health.ok { color: var(--ok); }
+.health.bad { color: var(--err); }
+
+main {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 16px 24px;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.card:last-of-type { grid-column: 1 / -1; }
+.card h2 { margin: 0 0 12px; font-size: 15px; }
+
+.engines { display: flex; flex-wrap: wrap; gap: 10px; }
+.engine {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  min-width: 200px;
+  flex: 1 1 200px;
+}
+.engine .name { font-weight: 600; font-size: 14px; }
+.engine .msg { color: var(--muted); font-size: 12px; margin-top: 4px; word-break: break-all; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  margin-top: 6px;
+  border: 1px solid currentColor;
+}
+.badge.ready, .badge.completed { color: var(--ok); }
+.badge.running, .badge.preparing { color: var(--accent); }
+.badge.queued, .badge.stopped { color: var(--muted); }
+.badge.failed, .badge.cancelled { color: var(--err); }
+
+label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+input, select, textarea, button {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  margin-top: 4px;
+  width: 100%;
+}
+textarea { resize: vertical; }
+
+.row { display: flex; gap: 12px; }
+.row label { flex: 1; }
+.row.actions { align-items: center; }
+.row.filters { align-items: flex-end; }
+.row.filters label { max-width: 180px; }
+
+button {
+  cursor: pointer;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  width: auto;
+}
+button.secondary { background: transparent; color: var(--text); border-color: var(--border); }
+button.danger { background: transparent; color: var(--err); border-color: var(--err); }
+button:disabled { opacity: 0.5; cursor: default; }
+
+table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; }
+td .prompt { color: var(--muted); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td .task-id { font-family: Consolas, monospace; font-size: 12px; }
+td .error { color: var(--err); font-size: 12px; max-width: 320px; word-break: break-all; }
+
+.progress { width: 90px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.progress > div { height: 100%; background: var(--accent); }
+
+.thumbs { display: flex; gap: 6px; flex-wrap: wrap; }
+.thumbs img, .thumbs video { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); }
+.thumbs a.file { font-size: 12px; color: var(--accent); }
+
+.muted { color: var(--muted); }
+.hidden { display: none; }
+
+.toast {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  padding: 12px 16px;
+  max-width: 420px;
+  font-size: 13px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+}
+.toast.error { border-left-color: var(--err); }
+.toast.success { border-left-color: var(--ok); }
+
+@media (max-width: 900px) {
+  main { grid-template-columns: 1fr; }
+  .row { flex-direction: column; gap: 0; }
+}

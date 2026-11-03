@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strata 本地控制台</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Strata <span class="sub">本地生成控制台</span></h1>
+  <div class="health" id="health">连接中…</div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>引擎状态</h2>
+    <div id="engines" class="engines"><div class="muted">加载中…</div></div>
+  </section>
+
+  <section class="card">
+    <h2>新建生成任务</h2>
+    <form id="task-form">
+      <div class="row">
+        <label>任务类型
+          <select id="task-type">
+            <option value="image">图像</option>
+            <option value="video">视频</option>
+            <option value="music">音乐</option>
+          </select>
+        </label>
+        <label>引擎
+          <select id="engine-id"></select>
+        </label>
+        <label>模型 ID（可选）
+          <input id="model-id" type="text" placeholder="留空使用引擎默认模型">
+        </label>
+      </div>
+      <label>提示词
+        <textarea id="prompt" rows="3" placeholder="描述你想生成的内容…" required></textarea>
+      </label>
+      <label>参数（JSON，可选）
+        <input id="parameters" type="text" placeholder='{"width": 1024, "steps": 4}'>
+      </label>
+      <div class="row actions">
+        <button type="submit" id="submit-btn">提交任务</button>
+        <span id="form-message" class="muted"></span>
+      </div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>任务列表</h2>
+    <div class="row filters">
+      <label>状态筛选
+        <select id="status-filter">
+          <option value="">全部</option>
+          <option value="queued">排队中</option>
+          <option value="preparing">准备中</option>
+          <option value="running">执行中</option>
+          <option value="completed">已完成</option>
+          <option value="failed">失败</option>
+          <option value="cancelled">已取消</option>
+        </select>
+      </label>
+      <button type="button" id="refresh-btn">刷新</button>
+    </div>
+    <table id="task-table">
+      <thead>
+        <tr>
+          <th>任务</th><th>类型 / 引擎</th><th>状态</th><th>进度</th>
+          <th>创建时间</th><th>产物</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="task-body"><tr><td colspan="7" class="muted">加载中…</td></tr></tbody>
+    </table>
+  </section>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

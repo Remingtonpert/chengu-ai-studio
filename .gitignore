@@ -1,0 +1,9 @@
+.venv/
+.venv-image/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+logs/
+output/
+models/
