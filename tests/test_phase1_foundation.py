@@ -70,21 +70,40 @@ def test_database_migration_is_idempotent(tmp_path):
     } <= columns
 
 
-def test_main_window_navigation_and_unverified_generation_is_disabled(tmp_path, monkeypatch):
+def test_main_window_creation_and_system_navigation(tmp_path, monkeypatch):
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     application = QApplication.instance() or QApplication([])
     paths = AppPaths.from_environment(
         app_home=tmp_path / "profile",
         data_root=tmp_path / "data",
     )
-    window = MainWindow(ConfigStore(paths), logging.getLogger("test"), "test.db")
+    window = MainWindow(
+        ConfigStore(paths), logging.getLogger("test"), str(tmp_path / "db" / "studio.sqlite3")
+    )
 
-    assert window.navigation.count() == 10
-    for row, page in enumerate(PAGES):
-        window.navigation.setCurrentRow(row)
-        assert window.stack.currentIndex() == row
-        if page[3]:
-            assert window.stack.currentWidget().generate_button.isEnabled() is False
+    # 创作页（MJ 同款三栏 + 五模式 Tab）常驻 stack 首屏；
+    # PAGES 里三个生成模式已并入 Tab，其余系统页保留在「系统功能」入口。
+    from app.ui.pages.creation_page import CreationPage
+
+    assert isinstance(window.creation, CreationPage)
+    assert window.stack.widget(0) is window.creation
+    assert len(window._system_shells) + 1 == window.stack.count()
+
+    system_keys = [key for key, _, _, is_generator in PAGES if not is_generator]
+    assert set(system_keys) == set(window._system_shells)
+    for key in system_keys:
+        window._show_system(key)
+        assert window.stack.currentWidget() is window._system_shells[key]
+        assert not window.param_panel.isVisibleTo(window)
+    window._show_creation()
+    assert window.stack.currentWidget() is window.creation
+    assert window.param_panel.isVisibleTo(window)
+
+    # 会话 CRUD（非交互部分）：新建 → 激活 → 持久化
+    before = len(window.store.sessions)
+    window._new_session()
+    assert len(window.store.sessions) == before + 1
+    assert window.store.active_id == window.store.sessions[0]["id"]
 
     window.close()
     application.quit()

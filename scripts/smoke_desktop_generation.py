@@ -1,8 +1,9 @@
-"""桌面端生成接线冒烟测试（不启动 worker 循环，绝不触碰 GPU）。
+"""桌面端 MJ 同款创作界面冒烟测试（不启动 worker 循环，绝不触碰 GPU）。
 
-验证：MainWindow 三模态（图像/视频/音乐）的引擎状态映射、生成按钮启用状态，
-以及「生成」按钮 → TaskService.submit_task → SQLite 排队这条真实提交路径。
-使用临时数据根目录，不会写入真实任务库，也不会领取任何真实任务。
+验证：五模式 Tab、想象 4 连发真实落库（queued）、i2i/i2v 垫图门槛、
+t2v 参数快照（33 帧 @24fps）、音乐显存门槛（不弹窗、不伪造）、
+retry 对 queued 任务的诚实拒绝、会话 JSON 持久化、系统功能十页导航。
+使用临时 APP_HOME：任务与会话只写入临时目录，不会领取任何真实任务。
 """
 
 from __future__ import annotations
@@ -13,11 +14,11 @@ import tempfile
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-tmp_root = tempfile.mkdtemp(prefix="chenguai_smoke_t32_")
+tmp_root = tempfile.mkdtemp(prefix="chenguai_smoke_t37_")
 os.environ["CHENGUAI_APP_HOME"] = os.path.join(tmp_root, "home")
-# 数据根目录指向真实项目根：让引擎注册做真实的权重/依赖检查（Windows 下
-# Models 与 models 同路径），而任务库在 APP_HOME（临时目录），冒烟提交只会
-# 写入临时库；由于不启动执行者，任何 GPU worker 都不会被拉起。
+# 数据根目录指向真实项目根：让引擎注册做真实的权重/依赖检查（与真实部署
+# 一致），而任务库与会话文件在 APP_HOME（临时目录）。不启动执行者，
+# 任何 GPU worker 都不会被拉起。
 os.environ["CHENGUAI_DATA_ROOT"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 from app.core.config import ConfigStore  # noqa: E402
@@ -26,8 +27,8 @@ from app.core.paths import AppPaths  # noqa: E402
 from app.engine_registration import register_production_engines  # noqa: E402
 from app.tasks.engine_manager import EngineManager  # noqa: E402
 from app.tasks.service import TaskService  # noqa: E402
-from app.ui.main_window import PAGES, MainWindow  # noqa: E402
-from app.ui.pages.workspace_page import WorkspacePage  # noqa: E402
+from app.ui.main_window import MainWindow  # noqa: E402
+from app.ui.session_store import SESSIONS_FILENAME  # noqa: E402
 
 paths = AppPaths.from_environment()
 paths.prepare_app_home()
@@ -46,64 +47,138 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 application = QApplication.instance() or QApplication([sys.argv[0], "-platform", "offscreen"])
 window = MainWindow(
-    config_store, logger, str(paths.database_file), task_service, engine_manager
+    config_store, logger, str(paths.database_file), task_service, engine_manager, None
 )
+page = window.creation
 
 failures: list[str] = []
 
-page_by_key: dict[str, WorkspacePage] = {}
-for index, (key, _title, _desc, is_generator) in enumerate(PAGES):
-    widget = window.stack.widget(index)
-    if is_generator and isinstance(widget, WorkspacePage):
-        page_by_key[key] = widget
 
-for key in ("image", "video", "music"):
-    page = page_by_key[key]
-    ready = window._workspace_engine_ready(key)
-    label = window._workspace_engine_label(key)
-    enabled = page.generate_button.isEnabled()
-    print(f"[page:{key}] ready={ready} label={label!r} button_enabled={enabled}")
-    if ready and not (label and enabled):
-        failures.append(f"{key}: 已注册但按钮未启用或标签为空")
+def task_count() -> int:
+    return len(task_service.list_tasks(limit=1000))
 
-music_page = page_by_key["music"]
-if window._music_ready and "ACE-Step 1.5" not in window._page_description("music", ""):
-    failures.append("music 页描述未反映 ACE-Step 1.5 已接入")
 
-# 真实提交路径：UI 回调 → TaskService → SQLite（queued），不启动执行者。
-for kind, prompt, params in (
-    ("image", "冒烟测试图像描述", {}),
-    ("music", "冒烟测试歌曲", {"instrumental": True}),
-    ("video", "冒烟测试视频", {"init_image_path": "C:/definitely-not-exist/frame.png"}),
-):
-    before = len(task_service.list_tasks(limit=1000))
-    window._submit_generation(kind, prompt, params)  # pylint: disable=protected-access
-    record = task_service.list_tasks(limit=1)[0]
-    print(f"[submit:{kind}] status={record.status.value} engine={record.request.engine_id}")
-    assert record.status.value == "queued"
-    assert len(task_service.list_tasks(limit=1000)) == before + 1
+# ---------------------------------------------------------------- Tab 与模式
+tab_modes = [tab.mode for tab in page.tab_buttons]
+print(f"[tabs] {tab_modes}")
+if tab_modes != ["t2i", "i2i", "t2v", "i2v", "music"]:
+    failures.append(f"五模式 Tab 顺序异常：{tab_modes}")
+for mode in tab_modes:
+    page.switch_mode(mode)
+    if page.panel.mode != mode or page.composer._modality is None:
+        failures.append(f"切换 {mode} 后面板/composer 未跟随")
+print("[tabs] 五模式切换全部生效（参数面板可见性 + composer 占位文案）")
 
-# 非法输入：空描述必须诚实报错，不产生任务
-before = len(task_service.list_tasks(limit=1000))
-music_page.prompt_input.setPlainText("")
-music_page.lyrics_input.setPlainText("")
-music_page._submit()  # pylint: disable=protected-access
-result_text = music_page.result_label.text()
-if len(task_service.list_tasks(limit=1000)) != before:
-    failures.append("空描述提交竟然产生了任务")
-print(f"[reject:empty] result_label={result_text!r}")
+# ------------------------------------------------------- 文生图：想象 4 连发
+page.switch_mode("t2i")
+page.composer.clear_prompt()
+page.composer.set_prompt("冒烟测试图像描述")
+before = task_count()
+page.imagine()
+submitted = task_count() - before
+print(f"[imagine:t2i] 新增任务 {before} -> {task_count()}")
+if submitted != 4:
+    failures.append(f"想象应排队 4 张，实际 {submitted}")
+latest = task_service.list_tasks(limit=4)
+for record in latest:
+    if record.status.value != "queued" or record.request.engine_id != "flux-schnell":
+        failures.append(f"任务状态/引擎异常：{record.status.value} {record.request.engine_id}")
+seeds = {record.request.parameters.get("seed") for record in latest}
+if len(seeds) != 4 or None in seeds:
+    failures.append(f"4 张 seed 应互不相同且必有：{seeds}")
 
-# 歌词超长必须被拒绝（与 worker 白名单一致）
-music_page.prompt_input.setPlainText("冒烟")
-music_page.lyrics_input.setPlainText("啊" * 4097)
-music_page._submit()
-if "4096" not in music_page.result_label.text():
-    failures.append("超长歌词未被拒绝")
-print(f"[reject:lyrics] result_label={music_page.result_label.text()!r}")
+# i2i：缺垫图必须诚实拒绝，不产生任务
+page.switch_mode("i2i")
+page.composer.clear_prompt()
+page.composer.set_prompt("需要垫图的冒烟")
+before = task_count()
+page.imagine()
+if task_count() != before:
+    failures.append("i2i 无垫图竟然提交了任务")
+print("[gate:i2i] 无垫图被拒绝，未产生任务")
+
+# ------------------------------------------------------------ 文生视频参数
+page.switch_mode("t2v")
+page.composer.clear_prompt()
+page.composer.set_prompt("冒烟测试视频")
+before = task_count()
+page.imagine()
+if task_count() != before + 1:
+    failures.append("t2v 未提交 1 个任务")
+video_record = task_service.list_tasks(limit=1)[0]
+params = video_record.request.parameters
+print(
+    f"[submit:t2v] engine={video_record.request.engine_id} "
+    f"frames={params.get('num_frames')} steps={params.get('steps')}"
+)
+if video_record.status.value != "queued":
+    failures.append("t2v 任务未排队")
+if params.get("num_frames") != 33 or "init_image_path" in params:
+    failures.append(f"t2v 参数快照异常：{params}")
+
+# i2v：缺垫图必须诚实拒绝
+page.switch_mode("i2v")
+page.composer.clear_prompt()
+page.composer.set_prompt("需要垫图的视频")
+before = task_count()
+page.imagine()
+if task_count() != before:
+    failures.append("i2v 无垫图竟然提交了任务")
+print("[gate:i2v] 无垫图被拒绝，未产生任务")
+
+# ------------------------------------------------- 音乐：显存/注册门槛不伪造
+page.switch_mode("music")
+page.composer.clear_prompt()
+page.composer.set_prompt("冒烟测试歌曲")
+before = task_count()
+page.imagine()
+after = task_count()
+if after != before:
+    failures.append("音乐门槛被绕过（本应因显存/注册条件拦截，或弹窗未出现）")
+print(f"[gate:music] 提交被门槛拦截（任务数保持 {before}），未弹窗、未伪造输出")
+
+# ------------------------------------------------ 空提示词与失败重试的诚实性
+page.switch_mode("t2i")
+page.composer.clear_prompt()
+before = task_count()
+page.imagine()
+if task_count() != before:
+    failures.append("空提示词竟然提交了任务")
+print("[gate:empty] 空提示词被拒绝，未产生任务")
+
+first_image = next(r for r in task_service.list_tasks(limit=50) if r.request.task_type == "image")
+before = task_count()
+page.retry_task(first_image.task_id)  # queued 不可重试 → 必须诚实提示「重试失败」
+if task_count() != before:
+    failures.append("对 queued 任务重试竟然新建了任务")
+print("[retry:queued] 诚实拒绝，无新任务")
+
+page.cancel_task(first_image.task_id)  # loop=None → 必须诚实提示不可用
+print("[cancel:no-loop] 事件循环缺失时诚实报错，未崩溃")
+
+# --------------------------------------------------------- 会话持久化 + 导航
+sessions_file = paths.app_home / SESSIONS_FILENAME
+if not sessions_file.exists():
+    failures.append(f"会话文件未持久化：{sessions_file}")
+session_count = len(window.store.sessions)
+batch_count = sum(len(s.get("batches", [])) for s in window.store.sessions)
+print(f"[sessions] 会话 {session_count} 个 · 批次 {batch_count} 组 · 文件 {sessions_file.name}")
+if session_count < 1 or batch_count < 2:
+    failures.append("会话/批次未按预期落盘")
+window._new_session()
+if len(window.store.sessions) != session_count + 1:
+    failures.append("新建会话未生效")
+
+for key in ("home", "queue", "history", "models", "engines", "settings", "diagnostics"):
+    window._show_system(key)
+    if window.stack.currentWidget() is not window._system_shells[key]:
+        failures.append(f"系统页 {key} 导航失效")
+window._show_creation()
+print("[nav] 十页功能：五模式 Tab + 7 个系统页入口全部可达")
 
 if failures:
     print("SMOKE FAIL:")
     for line in failures:
         print(" -", line)
     raise SystemExit(1)
-print("SMOKE PASS：桌面端三模态接线与输入校验全部符合预期（未启动任何 GPU worker）")
+print("SMOKE PASS：桌面端 MJ 同款创作界面接线与门槛全部符合预期（未启动任何 GPU worker）")

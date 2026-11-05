@@ -11,7 +11,7 @@
 | **Phase 2** | ✅ 已完成 | 任务系统核心（FIFO 队列、状态管理、引擎生命周期隔离） |
 | **Phase 3** | 🚧 进行中 | 真实引擎已接入：FLUX.1-schnell 图像与 Anima 视频引擎已注册（`.venv-image` 独立 worker 子进程）；FLUX 权重（23 文件 / 33.73 GB）已在 `models\flux-schnell` 并 SHA-256 逐文件校验通过；**Web 控制台（Midjourney 风格三栏 + 五模式 Tab）**已上线；音乐模型选型调研已完成并已实装首选方案 ACE-Step 1.5（`.venv-music` 独立环境 + 独立 worker，MIT 权重 10.03 GB 已就位、四文件 safetensors 逐文件校验通过【权重就绪】）；真机验收进行中 |
 
-**重要提示**：图片与视频引擎已**接入**本地 worker（FLUX.1-schnell、Anima），FLUX.1-schnell 权重已就位并通过 SHA-256 逐文件校验；**桌面端三模态生成入口已接通共享任务服务**（FLUX 图像 / Anima 视频 / ACE-Step 音乐均可点「生成」提交真实任务，见下文 2026-11-05 桌面端接线一节），按钮启用只取决于引擎是否注册（权重与依赖在注册时校验），不提供任何模拟生成。AI 音乐引擎 ACE-Step 1.5 已注册（最低 12GB 显存，全本地离线推理，提交前前端自动做显存预检与能力边界确认），真机端到端验收完成前勿视为正式产出。程序不会产生占位图或模拟输出；验收通过前请勿将任何结果视为正式产出。桌面界面跟随 Windows 系统深/浅色主题自动切换。
+**重要提示**：图片与视频引擎已**接入**本地 worker（FLUX.1-schnell、Anima），FLUX.1-schnell 权重已就位并通过 SHA-256 逐文件校验；**桌面端已换成与网页端几乎一模一样的 MJ 深色三栏 + 五模式 Tab 创作界面**（文生图/图生图/文生视频/图生视频/AI 音乐五个 Tab 与网页端共用同一 `TaskService` 提交路径，见下文 2026-11-05「桌面端 MJ 同款创作界面」一节），能否提交只取决于引擎是否注册（权重与依赖在注册时校验），不提供任何模拟生成。AI 音乐引擎 ACE-Step 1.5 已注册（最低 12GB 显存，全本地离线推理，提交前前端自动做显存预检与能力边界确认），真机端到端验收完成前勿视为正式产出。程序不会产生占位图或模拟输出；验收通过前请勿将任何结果视为正式产出。桌面界面跟随 Windows 系统深/浅色主题自动切换。
 
 **已知运行约束**：本机另有 LLM 推理引擎常驻（约占 11.5 GB 显存 + 40 GB 内存），与 FLUX/Anima 互斥；生成图片/视频前先双击 `scripts\release_local_engine.bat` 释放显存（只结束 components 目录下的引擎进程，不影响控制台）。Anima 视频权重（`moovenio/Anima_2B_model` + `dc-anime-tiny` VAE + `gemma-3-4b-it` 文本编码器，社区类许可，商用前需审查）**尚未下载**，首次生成视频会联网自动下载（十几分钟量级）。
 
@@ -73,16 +73,18 @@ Third Project/
 │   │       ├── index.html       # 三栏骨架 + 五模式 Tab + 参数面板（data-modes 路由）
 │   │       ├── app.js           # 会话/队列/想象/V·U/视频/音乐 Tab 逻辑
 │   │       └── style.css        # 深色 MJ 极简风（手写 utility，无框架）
-│   ├── ui/                      # PySide6 界面层
+│   ├── ui/                      # PySide6 界面层（MJ 深色三栏，与网页端几乎一模一样）
 │   │   ├── __init__.py
-│   │   ├── main_window.py      # 主窗口与十页导航（状态驱动文案）
-│   │   ├── theme.py            # 跟随系统的深浅色主题（调色板 token + 样式表）
-│   │   └── pages/              # 页面组件
-│   │       ├── __init__.py
-│   │       ├── engine_status_page.py
-│   │       ├── settings_page.py
-│   │       ├── task_list_page.py
-│   │       └── workspace_page.py
+│   │   ├── main_window.py      # 主窗口：会话侧栏 + 创作区 + 参数面板三栏；十页系统功能并入
+│   │   ├── session_store.py    # 会话分组本机 JSON（与任务库同目录存放，不出本机）
+│   │   ├── theme.py            # 跟随系统的深浅色主题 + 网页端同款 MJ 调色 token 样式表
+│   │   ├── pages/              # 页面组件
+│   │   │   ├── __init__.py
+│   │   │   ├── creation_page.py   # 创作页：五模式 Tab + 会话流 + 想象/V·U/重试/取消/lightbox
+│   │   │   ├── engine_status_page.py
+│   │   │   ├── settings_page.py
+│   │   │   └── task_list_page.py
+│   │   └── widgets/            # MJ 风格组件：参数面板/composer/feed/产物卡/骨架/lightbox/toast
 │   └── utils/                   # 工具函数
 │       └── config.py
 ├── tests/                       # 测试目录
@@ -112,7 +114,8 @@ Third Project/
 │   ├── probe_coerce.py          # 提示词规整（coerce_prompt_text）单元断言
 │   ├── probe_task_db.py         # 任务库只读查询（排查历史失败任务）
 │   ├── probe_flux_encode.py     # FLUX encode_prompt CPU 直测（可选，重内存）
-│   ├── smoke_desktop_generation.py # 桌面端三模态接线冒烟（离屏 Qt，不启动 GPU worker）
+│   ├── smoke_desktop_generation.py # 桌面端 MJ 同款创作界面冒烟（离屏 Qt，不启动 GPU worker）
+│   ├── shot_desktop_ui.py       # 离屏验收截图：深色/浅色/系统页三张（.tmp_shots\）
 │   ├── check_hardware.py        # 启动前置硬件检测（显存/内存分级，只读本机）
 │   ├── fix_portable_paths.py    # 便携包首启路径自适应（纯本地文本替换）
 │   ├── build_portable.ps1       # 一键便携打包脚本
@@ -266,7 +269,7 @@ python -m app.bootstrap
 
 ---
 
-## 🖥️ 桌面端三模态生成接线 + 共享任务服务跨进程安全（2026-11-05）
+## 🖥️ 桌面端三模态生成接线 + 共享任务服务跨进程安全（2026-11-05 · 历史：界面已被下一节 MJ 同款界面取代；跨进程安全与共享服务层仍然有效）
 
 桌面端（PySide6）的 AI 图片 / AI 视频 / AI 音乐 三个页面已从「预览占位」升级为**真实提交入口**，与 Web 模式共用完全相同的服务层（同一 `TaskService`、同一 SQLite FIFO 队列、同一引擎 worker 子进程协议），无任何重复实现：
 
@@ -278,6 +281,40 @@ python -m app.bootstrap
   - **原子领取**：任务用 `UPDATE ... WHERE status='queued'` 条件更新领取（`_claim_task`），两个进程绝无可能重复执行同一任务。
   - **5 秒接管**：worker 循环的等待改为 5 秒超时轮询，另一进程排入队列的任务最迟 5 秒被当前执行者领走。
 - **验证（全部真实运行，非推演）**：`py_compile` 全绿；`pytest tests` **28 passed, 1 skipped**（含 `create_application` 离屏集成测试，覆盖新的后台事件循环）；`scripts\smoke_desktop_generation.py` 离屏冒烟 **SMOKE PASS**——三页 `ready=True`、按钮启用、标签正确；image/music/video 三条提交路径全部落库 `queued`（临时任务库，不启动任何 GPU worker）；空描述与超长歌词被诚实拒绝。
+
+---
+
+## 🎨 桌面端 MJ 同款创作界面（2026-11-05）
+
+桌面端从「十个侧栏页 + 生成表单」重构为与 Web 控制台**一模一样的 Midjourney 风格三栏创作界面**；`app/tasks`、`app/engine`、`app/web` 与共享服务层一行未改，`app/ui/` 之外只动了 `app/bootstrap.py` 两处。
+
+### 布局与视觉
+
+| 区域 | 内容 |
+| --- | --- |
+| 左栏（250px） | 品牌区 + 引擎状态副标题、`＋ 新建会话`、会话列表（缩略图 / 标题 / ✎ 重命名 / 🗑 删除，删除仅删本机会话分组，服务器任务与产物不受影响）、`系统功能` 七个入口 |
+| 中栏 | 顶栏（会话标题 + 引擎药丸 + 任务服务健康药丸 + `⚙`）、**五模式 Tab**（文生图 / 图生图 / 文生视频 / 图生视频 / AI 音乐，Tab 右上角蓝色角标 = 该模态活动任务数）、会话流（批次气泡 + kind/mode/时间标签 + 产物网格）、composer（垫图区 + 多行提示词 + `想象 Enter` + 参数摘要行） |
+| 右栏（320px） | 引擎选择与「重启」、按模式显隐的参数分区：尺寸 chips + 滑杆 + 数字框、steps（图 ≤12 / 视频 ≤50）、seed 锁定与随机、负向提示词、风格 / 曲风 chips（改写提示词）、图生图强度、视频尺寸与帧数、音乐 BPM 与时长、高级参数 JSON 白名单 |
+
+配色直接沿用网页端 `style.css` 的 token（`--bg:#0a0b0d`、`--bg-soft:#101114`、`--bg-card:#16181c`、`--line:#23262c`、`--text:#e8eaed`、`--accent:#d8dade`、`--blue:#7d9bff`、`--red:#f07171`、`--green:#6fd08c`、`--radius:12px`），并继续跟随系统深/浅色（`CHENGUAI_THEME=light|dark` 可强制，4 秒轮询热切换）。
+
+### 与网页端逐字对齐的行为（`app/ui/pages/creation_page.py`）
+
+- **提交**：一次「想象」排队 4 张；`seedLock` 时用 `seed+i`，否则每张随机 seed；提交后立即清空 composer 并滚到底部。
+- **门槛与文案**（与 `app.js` 完全一致）：空提示词「先写提示词」；无引擎「没有已注册的引擎，请先检查 engines_enabled 与引擎环境」；`i2i`/`i2v` 缺垫图各自专属文案；垫图路径必须是盘符开头的绝对路径，例：`D:\ChenguAI\uploads\photo.png`。
+- **视频**：`num_frames` 按 `4n+1` 吸附（24fps，5–161），参数快照含 `width/height/steps/num_frames/negative_prompt/seed`，垫图存在时写 `init_image_path`（优先于高级参数）。
+- **音乐**：四道门槛顺序与文案逐字——引擎未注册 / 检测不到 NVIDIA 显卡 / 显存总量 < 12288 MB / 空闲显存 < 7000 MB（提示双击 `scripts\release_local_engine.bat`）；通过后弹四行能力确认（4–10 分钟、12GB 约 8 分钟截断、不支持多轨、BPM·时长·串行队列），成功 toast 说明首次加载约 10GB 权重与 48kHz wav。
+- **V / U / 重试 / 取消**：`V` 强度 0.7 排 4 张变体；`U` 按 1.5×（受 1,350,000 像素安全上限回缩）强度 0.45 重建；失败任务「重试」走 `TaskService.retry_task`，命中原批次则并入，否则按参数回退模式建新批次；取消与引擎重启通过 `asyncio.run_coroutine_threadsafe` 回投到服务事件循环，结果用 toast 回执（跨线程经类信号，不用 `QTimer.singleShot`）。
+- **产物展示**：图片 4 格网格（单任务/视频/U 放大多为单列）、悬停淡入 `V 变化`/`U 放大`、`seed x · W×H` 角注、lightbox 大图（←/→、V/U、复制提示词、打开所在文件夹）、视频卡片（首帧缩略图 + 打开视频/文件夹）、音乐内嵌播放条（进度、时长、失败自动降级系统播放器）、加载骨架（取消按钮 + 排队位次 + 管线说明）、失败卡片（重试 / 「已重试 →」）、toast 三态。
+- **会话与状态**：`app/ui/session_store.py` 存 `desktop_sessions.json`（与任务库同目录，即 APP_HOME；临时文件 + `os.replace` 原子写，上限 120 会话），与 Web 的 localStorage 等价但换成本机文件；两端同开时读写同一份任务库，谁先持执行者锁谁执行。每 2.5 秒轮询 `list_tasks(limit=400)` 与 `list_statuses()`，用「状态签名」做脏检查后才重建网格。
+
+### 十页功能一个不少
+
+`首页概览 / 任务队列 / 生成历史 / 模型管理 / 引擎管理 / 系统设置 / 日志与诊断` 七页保留在左栏 `系统功能`，进入时带「← 返回创作」顶栏（`SystemPageShell`）并隐藏右栏参数面板；`app/ui/pages/task_list_page.py`、`engine_status_page.py`、`settings_page.py` 原样复用，`workspace_page.py` 已删除。`app/bootstrap.py` 的改动只有两处：`start_task_service_loop` 返回 `(stop, loop)`、把 `service_loop` 传给 `MainWindow`（`MainWindow(config_store, logger, database_path, task_service=None, engine_manager=None, service_loop=None)` 保持旧调用兼容）。
+
+### 真实验证
+
+`pytest tests` **31 passed, 1 skipped**（导航测试已重写为「五 Tab + 七系统页 + 会话新建」断言）；`scripts\smoke_desktop_generation.py` 离屏冒烟 **SMOKE PASS**：五模式顺序为 `t2i/i2i/t2v/i2v/music` 且切换生效、想象真实落库 4 个 `queued`（seed 互不相同、引擎 `flux-schnell`）、`i2i`/`i2v` 无垫图被诚实拒绝、`t2v` 参数快照 `frames=33 steps=28` 且无 `init_image_path`、音乐因空闲显存不足被门槛拦截（未弹窗、未伪造、任务数不变）、空提示词被拒、对 `queued` 任务重试诚实拒绝、无事件循环时取消报错不崩溃、会话文件已落盘。`scripts\shot_desktop_ui.py` 生成 `.tmp_shots\desktop_dark.png` / `desktop_light.png` / `desktop_system.png` 三张离屏截图用于核对三栏结构、4 格网格、骨架屏与系统页返回顶栏；注意离屏平台无中文字体，截图里中文显示为方框属平台限制，与样式表无关（Windows 实机正常）。**未启动任何 GPU worker，未写入真实任务库。**
 
 ---
 
