@@ -1,6 +1,6 @@
 # 辰鹄 AI 创作中心：引擎调研
 
-**状态：Phase 0 桌面资料调研完成（2026-10-11 快照）。此后项目已推进：FLUX.1-schnell 已集成并在 RTX 3060 上产出真实图片（多批成功产物 + 离线复现），ACE-Step 1.5 已集成（`.venv-music`，权重 10.03 GB SHA-256/safetensors 逐文件校验通过），Anima 视频引擎已注册（权重待用户决策下载）；中文提示词端到端与音乐端到端真机验收正在排队执行。当前进度真相源：根 `README.md`；模块与接口：`docs/MODULES.md`。**  
+**状态：Phase 0 桌面资料调研完成（2026-10-11 快照）。此后项目已推进：FLUX.1-schnell 已集成并在 RTX 3060 上产出真实图片（多批成功产物 + 离线复现），ACE-Step 1.5 已集成（`.venv-music`，权重经 SHA-256/safetensors 逐文件校验通过），Anima 引用已于 2026-11-05 整体移除（真实上游为非商业许可，且代码原引用的仓库不存在），视频引擎 2026-11-05 收口接入 Wan2.1-T2V-1.3B / Wan2.1-VACE-1.3B（Apache-2.0，`.venv-video`，`models/wan2.1` 物理 44.18 GB）；中文提示词端到端与音乐端到端真机验收正在排队执行。当前进度真相源：根 `README.md`；模块与接口：`docs/MODULES.md`。**  
 **核查日期：2026-10-11**。仓库主分支是可变引用；官方仓库的精确 commit SHA 和模型文件字节数未能从当前网络环境取得，部署前必须重新记录并锁定（FLUX 快照 23 文件 / 33.73 GB、ACE-Step 四文件已实际锁定校验）。
 
 ## 结论摘要
@@ -8,7 +8,7 @@
 | 模态 | 优先候选 | 桌面证据 | 许可证/适配结论 | 决策（2026-11-05 现状标注） |
 |---|---|---|---|---|
 | 图片 | FLUX.1-schnell + Diffusers | BFL 官方代码列出 Apache-2.0 权重；Diffusers 有本地 pipeline 和 CPU offload 示例 | 适合作为首个候选；RTX 3060 的峰值显存、速度、完整 Windows 依赖组合仍未实测 | **已集成**：RTX 3060 真实出图 + 离线复现留证（见根 README） |
-| 视频 | FramePack（I2V 优先） | 官方 README 明列 Windows、RTX 30/40/50、最低 6GB；官方 Windows 包为 CUDA 12.6 / PyTorch 2.6，并称模型另需下载 30GB 以上 | 12GB 仅有项目方最低显存声明，不是本机实测；模型权重许可与稳定可编程控制接口待核验 | 未采用；实际接入的是 Anima（`app/engine/video/anima.py`），其权重许可属社区类，**下载与否待用户确认** |
+| 视频 | FramePack（I2V 优先） | 官方 README 明列 Windows、RTX 30/40/50、最低 6GB；官方 Windows 包为 CUDA 12.6 / PyTorch 2.6，并称模型另需下载 30GB 以上 | 12GB 仅有项目方最低显存声明，不是本机实测；模型权重许可与稳定可编程控制接口待核验 | 未采用；曾接入的 Anima 引用已于 2026-11-05 **整体移除**（其引用的 `moovenio/Anima_2B_model` 仓库不存在、本机 diffusers 无 `AnimaPipeline` 符号，真实上游 `circlestone-labs/Anima` 为文生图模型且非商业许可）；未采用；最终选型收口为 **Wan2.1 1.3B**（T2V + VACE，Apache-2.0），2026-11-05 已接入 |
 | 音乐 | ACE-Step v1.5 | 官方项目页提供 Windows venv 安装说明和本地运行/API 路线，2026-01-28 公告 v1.5 | README 的 8GB 优化与 3090 基准属于旧版本/旧测试，不能外推至 v1.5；v1.5 权重许可和 RTX 3060 实测未核实 | **已集成**（`.venv-music`，权重逐文件校验，12GB 档 DiT offload）；RTX 3060 端到端出音频验收仍排队，通过前不标记已验证 |
 
 这不是硬件认证或法律意见。所有“兼容”在本项目中须以目标 Windows 机器、固定环境、目标模型和可打开的实际输出文件通过测试为准。

@@ -1,13 +1,13 @@
 # 辰鹄 AI 创作中心：许可证审计
 
-**核查日期：2026-10-11（调研快照）· 2026-11-05 增补：FLUX.1-schnell（Apache-2.0）与 ACE-Step 1.5（官方仓库 README 声明 MIT，权重经 `ACE-Step/Ace-Step1.5` 下载并逐文件校验）已实际集成进本地引擎；商用/再分发前仍须按本文件方法复核权重仓库内每个子模型的 LICENSE 元数据。Anima 视频权重（社区类许可）未下载、待用户决策。**  
+**核查日期：2026-10-11（调研快照）· 2026-11-05 增补：FLUX.1-schnell（Apache-2.0）与 ACE-Step 1.5（官方仓库 README 声明 MIT，权重经 `ACE-Step/Ace-Step1.5` 下载并逐文件校验）已实际集成进本地引擎；同日经 Hugging Face 仓库 API 复核权重仓库 license 元数据（见文末「模型许可台账」），两者均可商用、可随安装包再分发。同日视频选型收口：`Wan-AI/Wan2.1-T2V-1.3B-Diffusers`（文生视频）与 `Wan-AI/Wan2.1-VACE-1.3B-diffusers`（图生视频·首帧条件）经 HF API 实测均 **Apache-2.0（gated:false）**，已下载入包（`models/wan2.1`，两快照合计物理 44.18 GB）。Anima 视频引用已于 2026-11-05 整体移除（其真实上游为不可商用的社区许可，且代码原引用的仓库不存在），不下载、不入包。**  
 **范围：Phase 0 候选推理代码、模型权重及当前依赖声明。不是法律意见，也不是完整 SBOM。**
 
 ## 核心结论
 
 - FLUX.1-schnell 与 FLUX.1-dev 的权重许可证不同：schnell 为 Apache-2.0，dev 为 FLUX.1 [dev] Non-Commercial License。旧文中“FLUX dev 可商用”的结论错误，现已撤回。
 - FramePack 代码为 Apache-2.0，但不能据此认定所用模型权重可按 Apache-2.0 使用；具体权重来源及 license 未核实，阻止集成和分发。
-- ACE-Step 仓库代码为 Apache-2.0；v1.5 实际权重的模型仓库条款尚未从官方模型卡确认，阻止启用/分发及任何商业使用结论。
+- ACE-Step 仓库代码为 Apache-2.0；v1.5 实际权重的模型仓库条款尚未从官方模型卡确认，阻止启用/分发及任何商业使用结论。（2026-11-05 修订：`ACE-Step/Ace-Step1.5` 权重仓库 license 元数据经 HF 仓库 API 复核为 **MIT**，上述阻止结论解除，见文末台账。）
 - MusicGen 代码 MIT、权重 CC-BY-NC 4.0；权重明确为非商业许可。
 - 本地推理/离线运行不等于所有许可证允许商业使用，也不等于可以再分发模型权重。
 
@@ -20,7 +20,7 @@
 | FLUX.1-dev / dev 派生模型 | BFL 推理代码有独立许可，Diffusers 本身仍为 Apache-2.0 | FLUX.1 [dev] Non-Commercial License v1.1.1 | 仅授权非商业、非生产用途；商业用途须另行取得 BFL 授权；附有使用和内容过滤义务 | 不作为本项目默认模型；勿与 schnell 混淆 |
 | FramePack | 官方仓库 Apache-2.0 | FramePack 权重/上游权重需在实际模型 repo 分别确认；当前待核实 | 不得仅凭代码许可部署；须核对上游条款、使用区域、商业门槛及 NOTICE 义务 | 权重条款通过前不集成、不随应用分发 |
 | Tencent HunyuanVideo（对照） | 官方代码许可文件为 Tencent Hunyuan Community License Agreement 相关授权 | 同一社区协议覆盖其明确定义的模型权重和相关作品 | 有地域、用途、署名/Powered by、分发 Notice 和特定商业门槛条款；先阅读完整现行文本 | 原生大显存路线排除；FramePack 衍生/依赖关系需律师或授权方确认 |
-| ACE-Step v1.5 | 独立官方仓库 ACE-Step-1.5 README 声明 MIT；旧 v1 仓库 Apache-2.0 不适用于新代码 | v1.5 HF 权重仓库 license 未核实 | 未核实前不推断商业权利、再分发权或衍生权 | 有条件候选，权重许可仍阻止启用 |
+| ACE-Step v1.5 | 独立官方仓库 ACE-Step-1.5 README 声明 MIT；旧 v1 仓库 Apache-2.0 不适用于新代码 | v1.5 HF 权重仓库 license 元数据经 HF API 复核为 MIT（2026-11-05） | 保留 MIT 文本即可商用与再分发；再分发时随包保留 LICENSE | 已启用并随便携安装包分发 |
 | Meta MusicGen / AudioCraft | MIT | CC-BY-NC 4.0 | 非商业；不得作为商业创作默认模型；需履行 CC BY-NC 条款 | 商业路线排除 |
 | Stable Audio Open | `stable-audio-tools` 代码仓库许可证按仓库核查 | Stability AI Community License（具体模型/当前条款需保存副本） | 条款依主体、收入和用途而异，非无条件商业许可 | 暂不选为默认方案 |
 
@@ -59,7 +59,24 @@
 ## 2026-11-05 集成后增补
 
 - FLUX.1-schnell：权重快照 23 文件 / 33.73 GB 已逐文件 SHA-256 校验并锁定，仅本机推理使用，不随仓库分发（`models/` 在 `.gitignore`）；Apache-2.0 归属文本随快照保留。
-- ACE-Step 1.5：官方代码仓库声明 MIT；四文件权重共 10.03 GB 已逐文件校验（`.gitignore` 排除，不分发）。HF 权重仓库内各子模型的 license 元数据仍未逐项复核，**商用/再分发结论继续悬置**；`.cache` 目录（约 3.9GB）属下载残留，清理与否待用户确认。
-- Anima 视频：代码已接入注册链路，但权重（社区类许可）未下载、未集成——待用户逐项确认许可后再下载；当前视频能力在未注册/未就绪状态下对提交诚实报错。
+- ACE-Step 1.5：官方代码仓库声明 MIT；四文件权重已逐文件校验（`.gitignore` 排除，不随 git 仓库分发；随便携安装包分发）。HF 权重仓库 license 元数据已于 2026-11-05 经 HF 仓库 API 复核为 **MIT**，商用/再分发结论按台账执行。下载残留 `.cache` 目录（约 3.67GB，全部为 `.incomplete` 残片与 metadata，无 snapshots）已于 2026-11-05 删除，删除后四个 safetensors 头部结构与张量清单复核完好。
+- Anima 视频：已于 2026-11-05 **整体移除**（代码、权重引用、许可标注、安装包条目全部删除）。移除依据：① 代码原引用的 `moovenio/Anima_2B_model` 与 `mit-han-lab/dc-anime-tiny` 仓库经 HF/镜像 API 查询均不存在（404）；② 本机 diffusers 0.41.0 无 `AnimaPipeline` 符号；③ 真实上游 `circlestone-labs/Anima` 为**文生图**模型且许可证为 `circlestone-labs-non-commercial-license`（非商业），不符合本项目可商用要求。因此不下载、不入包；视频模态在界面诚实显示「暂无可用本地视频引擎 · 调研中」，不提交任务、不伪造输出。
 - 依赖清点：主 `.venv`（PySide6）、`.venv-image`（torch cu130/diffusers/transformers 5.x）、`.venv-music`（transformers<4.58）三环境已实际建立；正式 SBOM 与 `THIRD_PARTY_NOTICES.md` 仍未生成，属发布前必做项（见上节 3）。
 - 本节以下旧草稿残留（一张无出处的半成品许可矩阵表与「Phase 0 交付」清单）已于 2026-11-05 清理：该表把 FLUX.1-dev 标为「待确认」、含 SDXL/Open-Sora/SVD 等早已排除的候选且无官方出处，与上文正式矩阵冲突，不再保留。审计以本文件上文矩阵与增补为准。
+
+## 模型许可台账（2026-11-05，随便携安装包）
+
+许可字段当日经 Hugging Face 仓库 API（经 hf-mirror 镜像）实测读取；直连 huggingface.co 在本机超时。台账外的一律不进安装包。
+
+| 模型/组件 | 用途 | 来源仓库 | 大小（本机实测） | 许可（API 实测） | 商用 | 入便携包 |
+|---|---|---|---|---|---|---|
+| FLUX.1-schnell | 文生图 / 图生图（唯一图像引擎） | `black-forest-labs/FLUX.1-schnell` | 23 文件 / 33.73 GB，逐文件 SHA-256 校验 | Apache-2.0（gated:auto，经镜像取已校验快照） | ✅ | ✅ `models/flux-schnell` |
+| ACE-Step 1.5 代码 | AI 音乐引擎 | GitHub `ace-step/ACE-Step-1.5`（`vendor/ACE-Step-1.5`） | 仓库快照 | MIT | ✅ | ✅ |
+| ACE-Step 1.5 权重 | AI 音乐 | `ACE-Step/Ace-Step1.5` | 4 个 safetensors，9.40 GB（清理 `.cache` 残片后），逐文件校验 | MIT（gated:false） | ✅ | ✅ `models/ace-step-1.5` |
+| Qwen3-Embedding-0.6B | 音乐管线文本嵌入组件 | `Qwen/Qwen3-Embedding-0.6B` | 随音乐权重目录 | Apache-2.0 | ✅ | ✅ |
+| Wan2.1-T2V-1.3B-Diffusers | 文生视频（引擎 `wan-t2v`） | `Wan-AI/Wan2.1-T2V-1.3B-Diffusers` | HF 快照下载至 `models/wan2.1`（transformer 5.29GB fp32 + text_encoder 21.16GB fp32 + vae 0.48GB，bf16 换入峰值约 10.6GB） | Apache-2.0（gated:false） | ✅ | ✅ |
+| Wan2.1-VACE-1.3B-diffusers | 图生视频·首帧条件（引擎 `wan-i2v`） | `Wan-AI/Wan2.1-VACE-1.3B-diffusers` | 同一缓存根（text_encoder 10.58GB，VAE 与 T2V 共享 blob；两仓库合计物理 44.18 GB） | Apache-2.0（gated:false） | ✅ | ✅ 同上 |
+| ~~Anima（已移除）~~ | ~~视频~~ | `circlestone-labs/Anima`（真实上游） | 不下载 | `circlestone-labs-non-commercial-license`（**非商业**） | ❌ | ❌ 不入包 |
+
+- FLUX.1-schnell 快照内含 Apache-2.0 LICENSE 文本，再分发时随目录保留，满足 Apache 归属义务。
+- 安装包内四个 venv（`.venv`/`.venv-image`/`.venv-video`/`.venv-music`）与 runtime 的第三方 Python 包许可仍未逐包清点：正式 SBOM 与 `THIRD_PARTY_NOTICES.md` 属发布前必做项（见上节），本机自用与评测演示不受影响。

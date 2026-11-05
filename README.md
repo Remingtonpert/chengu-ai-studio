@@ -9,11 +9,11 @@
 | **Phase 0** | ✅ 已完成 | 引擎调研、许可证审计、硬件兼容性分析、架构提案、开发计划 |
 | **Phase 1** | ✅ 已完成 | 桌面骨架与本地基础（PySide6 UI、SQLite、配置服务） |
 | **Phase 2** | ✅ 已完成 | 任务系统核心（FIFO 队列、状态管理、引擎生命周期隔离） |
-| **Phase 3** | 🚧 进行中 | 真实引擎已接入：FLUX.1-schnell 图像与 Anima 视频引擎已注册（`.venv-image` 独立 worker 子进程）；FLUX 权重（23 文件 / 33.73 GB）已在 `models\flux-schnell` 并 SHA-256 逐文件校验通过；**Web 控制台（Midjourney 风格三栏 + 五模式 Tab）**已上线；音乐模型选型调研已完成并已实装首选方案 ACE-Step 1.5（`.venv-music` 独立环境 + 独立 worker，MIT 权重 10.03 GB 已就位、四文件 safetensors 逐文件校验通过【权重就绪】）；真机验收进行中 |
+| **Phase 3** | 🚧 进行中 | 真实引擎已接入：FLUX.1-schnell 图像引擎已注册（唯一文生图引擎，Apache-2.0 可商用，`.venv-image` 独立 worker 子进程）；FLUX 权重（23 文件 / 33.73 GB）已在 `models\flux-schnell` 并 SHA-256 逐文件校验通过；**视频引擎已接入 Wan2.1**：文生视频 `wan-t2v`（Wan2.1-T2V-1.3B）+ 图生视频 `wan-i2v`（Wan2.1-VACE-1.3B，首帧条件），Apache-2.0，`.venv-video` 独立环境 + 独立 worker，权重（两快照合计物理 44.18 GB）已在 `models\wan2.1` 离线快照；**Web 控制台（Midjourney 风格三栏 + 五模式 Tab）**已上线；音乐模型选型调研已完成并已实装首选方案 ACE-Step 1.5（`.venv-music` 独立环境 + 独立 worker，MIT 权重 10.03 GB 已就位、四文件 safetensors 逐文件校验通过【权重就绪】）；真机验收进行中 |
 
-**重要提示**：图片与视频引擎已**接入**本地 worker（FLUX.1-schnell、Anima），FLUX.1-schnell 权重已就位并通过 SHA-256 逐文件校验；**桌面端已换成与网页端几乎一模一样的 MJ 深色三栏 + 五模式 Tab 创作界面**（文生图/图生图/文生视频/图生视频/AI 音乐五个 Tab 与网页端共用同一 `TaskService` 提交路径，见下文 2026-11-05「桌面端 MJ 同款创作界面」一节），能否提交只取决于引擎是否注册（权重与依赖在注册时校验），不提供任何模拟生成。AI 音乐引擎 ACE-Step 1.5 已注册（最低 12GB 显存，全本地离线推理，提交前前端自动做显存预检与能力边界确认），真机端到端验收完成前勿视为正式产出。程序不会产生占位图或模拟输出；验收通过前请勿将任何结果视为正式产出。桌面界面跟随 Windows 系统深/浅色主题自动切换。
+**重要提示**：图片引擎已**接入**本地 worker（FLUX.1-schnell，Apache-2.0 可商用），FLUX.1-schnell 权重已就位并通过 SHA-256 逐文件校验；**视频引擎 Wan2.1 已注册**（`wan-t2v` 文生视频 / `wan-i2v` 图生视频·VACE 首帧条件，Apache-2.0，权重在 `models\wan2.1`，16fps mp4；提交前自动做显存预检，空闲不足诚实拦截并提示先释放显存；引擎未注册时同样拒绝提交），不伪造任何输出；**桌面端已换成与网页端几乎一模一样的 MJ 深色三栏 + 五模式 Tab 创作界面**（文生图/图生图/文生视频/图生视频/AI 音乐五个 Tab 与网页端共用同一 `TaskService` 提交路径，见下文 2026-11-05「桌面端 MJ 同款创作界面」一节），能否提交只取决于引擎是否注册（权重与依赖在注册时校验），不提供任何模拟生成。AI 音乐引擎 ACE-Step 1.5 已注册（最低 12GB 显存，全本地离线推理，提交前前端自动做显存预检与能力边界确认），真机端到端验收完成前勿视为正式产出。程序不会产生占位图或模拟输出；验收通过前请勿将任何结果视为正式产出。桌面界面跟随 Windows 系统深/浅色主题自动切换。
 
-**已知运行约束**：本机另有 LLM 推理引擎常驻（约占 11.5 GB 显存 + 40 GB 内存），与 FLUX/Anima 互斥；生成图片/视频前先双击 `scripts\release_local_engine.bat` 释放显存（只结束 components 目录下的引擎进程，不影响控制台）。Anima 视频权重（`moovenio/Anima_2B_model` + `dc-anime-tiny` VAE + `gemma-3-4b-it` 文本编码器，社区类许可，商用前需审查）**尚未下载**，首次生成视频会联网自动下载（十几分钟量级）。
+**已知运行约束**：本机另有 LLM 推理引擎常驻（约占 11.5 GB 显存 + 40 GB 内存），与 FLUX 互斥；生成图片前先双击 `scripts\release_local_engine.bat` 释放显存（只结束 components 目录下的引擎进程，不影响控制台）。视频引擎现为 **Wan2.1 1.3B**（Apache-2.0，与 FLUX/ACE-Step 同样受「先释放显存」约束；原 Anima 引用及其无效下载入口已于 2026-11-05 整体移除，真实上游 `circlestone-labs/Anima` 非商用，不下载、不入包）。
 
 ---
 
@@ -34,7 +34,7 @@ Third Project/
 ├── app/                          # 核心应用代码（桌面程序）
 │   ├── __init__.py              # 应用版本信息
 │   ├── bootstrap.py             # 启动入口、服务注册、生命周期管理
-│   ├── engine_registration.py   # 真实引擎注册（FLUX 图像 / Anima 视频 worker）
+│   ├── engine_registration.py   # 真实引擎注册（FLUX 图像 / ACE-Step 音乐 worker）
 │   ├── engine/prompt_utils.py   # 提示词类型规整（FLUX 中英文输入防护，零重依赖）
 │   ├── core/                    # 核心服务层
 │   │   ├── config.py           # JSON 配置持久化与验证
@@ -47,12 +47,10 @@ Third Project/
 │   ├── engine/                  # 引擎抽象接口
 │   │   ├── __init__.py
 │   │   ├── abstract.py         # EngineAdapter Protocol
-│   │   ├── image/              # 图片引擎 adapter
-│   │   │   ├── __init__.py
-│   │   │   └── flux.py         # FLUX.1-schnell adapter
-│   │   └── video/              # 视频引擎 adapter
+│   │   ├── image/              # 图片引擎 adapter（FLUX.1-schnell）
 │   │       ├── __init__.py
-│   │       └── anima.py        # Anima 图生视频 adapter
+│   │       └── flux.py         # FLUX.1-schnell adapter
+│   │   └── video/              # 视频引擎 adapter（wan.py：Wan2.1 T2V / VACE）
 │   ├── models/                  # 模型管理（待 Phase 5 实现）
 │   │   ├── __init__.py
 │   │   ├── manager.py          # 模型清单、校验与下载确认
@@ -61,7 +59,8 @@ Third Project/
 │   │   ├── __init__.py
 │   │   ├── engine_manager.py   # 引擎生命周期管理（懒启动、健康检查）
 │   │   ├── flux_worker.py      # FLUX 图像 worker（生产适配器，运行于 .venv-image 子进程）
-│   │   ├── video_worker.py     # Anima 图生视频 worker（生产适配器，运行于 .venv-image 子进程）
+│   │   ├── music_worker.py     # ACE-Step 音乐 worker（运行于 .venv-music 子进程）
+│   │   ├── video_worker.py     # Wan2.1 视频 worker（运行于 .venv-video 子进程）
 │   │   ├── models.py           # TaskRequest/TaskResult/TaskRecord/TaskStatus
 │   │   ├── process_adapter.py  # ProcessEngineAdapter 子类定义
 │   │   ├── process_worker.py   # Worker 协议实现与 JSONL IPC
@@ -93,6 +92,7 @@ Third Project/
 │   ├── test_phase1_foundation.py
 │   ├── test_task_service.py
 │   └── test_cross_process_safety.py  # 执行者锁/原子领取/5秒轮询接管专项测试
+├── LICENSES.md                    # 模型许可台账（集成的全部模型仅 Apache-2.0 / MIT）
 ├── docs/                        # 技术文档
 │   ├── ARCHITECTURE.md         # 架构提案与模块边界
 │   ├── DEVELOPMENT_PLAN.md     # 阶段验收计划
@@ -110,6 +110,8 @@ Third Project/
 │   ├── release_local_engine.bat/.ps1  # 释放本机 LLM 引擎显存（生成前必跑）
 │   ├── setup_music_venv.ps1     # 音乐引擎环境一键搭建（.venv-music，幂等）
 │   ├── download_music_weights.py # ACE-Step 1.5 权重下载（断点续传）
+│   ├── setup_video_venv.ps1      # 视频引擎环境一键搭建（.venv-video，幂等）
+│   ├── download_video_weights.py # Wan2.1 T2V/VACE 权重下载（hf-mirror，断点续传）
 │   ├── finalize_music_weights.py # 权重下载监控 + 同步/校验自动收尾
 │   ├── probe_flux_tokenizer.py  # FLUX tokenizer 形状/类型离线复现诊断
 │   ├── probe_coerce.py          # 提示词规整（coerce_prompt_text）单元断言
@@ -123,8 +125,11 @@ Third Project/
 │   └── portable/                # 打包模板：启动辰鹄.bat / 启动桌面端.bat / 打包与迁移说明.md
 ├── data/                        # 默认数据根：配置、会话数据库、日志、权重缓存、输出（可被环境变量覆盖）
 ├── .venv/                       # PySide6 桌面程序虚拟环境（Python 3.11）
-├── .venv-image/                 # 图片/视频引擎专用虚拟环境（torch cu130 + diffusers 已装）
+├── .venv-image/                 # 图片引擎专用虚拟环境（torch cu130 + diffusers，FLUX.1-schnell）
+├── .venv-video/                 # 视频引擎专用虚拟环境（torch cu130 + diffusers WanPipeline/WanVACEPipeline）
+├── .venv-music/                 # 音乐引擎专用虚拟环境（transformers<4.58，与 .venv-image 隔离）
 ├── requirements-dev.txt         # 开发依赖（含 pytest）
+├── pytest.ini                     # pytest 配置（只收 tests，排除各 venv/dist/vendor）
 └── requirements.txt             # 桌面 UI 依赖（仅 PySide6）
 ```
 
@@ -198,15 +203,15 @@ python -m app.bootstrap
 |-----|------|----------|----------|
 | 文生图 | 4 张/次（`task_type=image`） | 尺寸/steps/seed | FLUX.1-schnell，4 步 |
 | 图生图 | 4 张/次 | 上述 + **重绘强度** + **垫图上传区** | FLUX img2img（需本机绝对路径） |
-| 文生视频 | 单任务（`task_type=video`） | 视频尺寸/**时长（5–161 帧）**/steps | FLUX 出首帧 → Anima 渲染 |
-| 图生视频 | 单任务 | 同上 + **首帧图上传区** | Anima 图生视频 |
+| 文生视频 | 单任务（`task_type=video`） | 视频尺寸/**时长（5–161 帧）**/steps | **Wan2.1-T2V-1.3B**（`wan-t2v`，`.venv-video` 独立 worker），16fps mp4，提交前显存预检 |
+| 图生视频 | 单任务 | 同上 + **首帧图上传区** | **Wan2.1-VACE-1.3B**（`wan-i2v`）：首帧=垫图条件生成（mask 首帧 0、其余全生成），其余同上 |
 | AI音乐 | 单任务（`task_type=music`），提交前前端预检显存并弹能力边界确认 | BPM/目标时长（30–480s）/曲风 | **ACE-Step 1.5**（`.venv-music` 独立 worker），48kHz wav |
 
 要点：
 - **一次想象 = 4 个任务**；图片瓦片带 **V**（变体，strength 0.7×4）与 **U**（放大，1.5× + strength 0.45）；
 - **会话全局共用**：同一会话可混排图片网格、视频卡片（`<video>` 播放 + 首帧缩略 + ⬇下载）、未来音频播放条；
 - Tab 徽标 = 该模态活跃任务数。注意：各模式**前端提交与展示相互独立**，底层 TaskService 是**单一 FIFO 队列（串行执行）**，切 Tab 不会并发抢占；
-- 视频硬约束来自 Anima：导出固定 **24 fps**，帧数必须为 4n+1（最长约 6.7 秒），引擎不暴露运动幅度/帧率参数（面板中为带说明的禁用占位）；尺寸 16 的倍数，建议 ≤512×384；
+- 视频参数（导出固定 **16fps**（Wan 原生）、帧数 `4n+1`（5–161）、尺寸 16 的倍数、建议 ≤512×384）前端与引擎两侧同口径收口；提交前显存预检（空闲 <10500MB 直接拦截并提示先释放），引擎未注册时诚实拒绝，不产生任何任务与输出；
 - 浏览器安全边界：无法读取剪贴板/拖入图片的真实磁盘路径，前端会**记住上次目录并按文件名预填**，用户核对即可；V/U 从已生成图走图生图不受此限；
 - 生成前先跑 `scripts\release_local_engine.bat` 释放显存，否则大概率 OOM。
 
@@ -251,6 +256,38 @@ python -m app.bootstrap
 - 一键复核：`python scripts\finalize_music_weights.py`（监视下载 + 自动收尾）或 `--verify-only`（直接同步 + 校验四文件）。校验通过打印 **[权重就绪]**；在此之前音乐生成功能不可用属预期（引擎 health_check 拒绝启动）。
 - 🧹 待批准清理：`models\ace-step-1.5\.cache\huggingface\download\` 内残留约 **3.9 GB** 旧会话断点垃圾文件（下载已完成，这些 `.incomplete` 不再被任何流程引用；便携打包脚本已排除 `.cache`）。删除操作按约定需用户点头后执行。
 - ⚠ 真机首测仍需：先双击 `scripts\release_local_engine.bat` 释放显存，再从 Web 控制台「AI音乐」Tab 提交中文人声曲目端到端验收。
+
+---
+
+## 🎬 视频引擎 Wan2.1（2026-11-05 接入：`wan-t2v` 文生视频 / `wan-i2v` 图生视频）
+
+**选型（用户确认）**：Wan2.1 官方**不存在 I2V-1.3B 档**（I2V 只有 14B）；1.3B 档图生视频唯一官方
+Apache-2.0 形态是 **VACE**。据此采用：
+
+- 文生视频：HF `Wan-AI/Wan2.1-T2V-1.3B-Diffusers` → 引擎 `wan-t2v`（diffusers `WanPipeline`）；
+- 图生视频：HF `Wan-AI/Wan2.1-VACE-1.3B-diffusers` → 引擎 `wan-i2v`（`WanVACEPipeline`，
+  首帧=垫图作为条件（`prepare_video_and_mask`：首帧 mask=0、其余帧待生成），非「FLUX 先出帧再渲染」）。
+
+- **隔离环境 `.venv-video`**（不动 .venv-image/.venv-music）：一键脚本 `scripts\setup_video_venv.ps1`（幂等）：
+  PyTorch **2.14.1+cu130 三件套** + diffusers 0.41.0 / transformers 5.19.0 / accelerate 1.15.0 / safetensors /
+  huggingface_hub 1.33.0 / sentencepiece / imageio(-ffmpeg)，装完做 `WanPipeline`/`WanVACEPipeline` 导入验证。
+- **权重（Apache-2.0，经 hf-mirror 断点续传下载）**：`python scripts\download_video_weights.py` 把两快照
+  下到 `models\wan2.1`（HF 新缓存布局：共享 `blobs\`，快照目录为链接）。**本机实测物理合计 44.18 GB**
+  （T2V text_encoder 21.16GB + VACE text_encoder 10.58GB 分片哈希不同不共享；VAE blob 共享。
+  脚本 `_dir_size` 会跟随链接双计，勿以 133GB 报告值为准）。
+- **引擎与 worker**：`app\engine\video\wan.py`——fp32 VAE + bf16 pipeline + `enable_model_cpu_offload` +
+  UniPC `flow_shift=3.0`（480p 档）；尺寸取 16 的倍数并按像素预算（≤832×480×1.15）自动收口；帧数 `4n+1`、
+  **16fps**；OOM 捕获后诚实报错并指引 `release_local_engine.bat`，绝不伪造。worker `app\tasks\video_worker.py`
+  参数白名单 `width/height/num_frames/steps/seed/negative_prompt`（i2v 另加 `init_image_path`；
+  t2v 带垫图直接报错「请改用图生视频引擎」）。
+- **模式 ↔ 引擎一一对应**：两端 `MODE_ENGINE_ALLOW`（t2v→`wan-t2v`、i2v→`wan-i2v`）自动过滤引擎下拉与
+  提交解析，不会把 i2v 任务投给 t2v 引擎。
+- **显存预检（前端直接拦截）**：总显存 <12288MB 或空闲 <10500MB → toast 拦截（Wan2.1 UMT5-XXL 编码器
+  bf16 换入峰值 T2V 约 10.6GB / VACE 约 5.3GB，加载期内存占用高），指引先双击 `scripts\release_local_engine.bat`。
+- **产物**：`wan_{t2v|i2v}_{时间戳}.mp4`（16fps）写入输出目录；前端视频卡片播放 + ⬇下载。
+  12GB 档 81 帧 480p（≈5.1 秒）预计数分钟到数十分钟，首次含权重加载；**真实耗时与显存峰值以真机实测为准**（见验收记录）。
+- **许可**：两仓库 Apache-2.0（HF API 实测 gated:false），台账见根目录 `LICENSES.md` 与
+  `docs\LICENSE_AUDIT.md`「模型许可台账」。
 
 ---
 
@@ -303,7 +340,7 @@ python -m app.bootstrap
 
 - **提交**：一次「想象」排队 4 张；`seedLock` 时用 `seed+i`，否则每张随机 seed；提交后立即清空 composer 并滚到底部。
 - **门槛与文案**（与 `app.js` 完全一致）：空提示词「先写提示词」；无引擎「没有已注册的引擎，请先检查 engines_enabled 与引擎环境」；`i2i`/`i2v` 缺垫图各自专属文案；垫图路径必须是盘符开头的绝对路径，例：`D:\ChenguAI\uploads\photo.png`。
-- **视频**：`num_frames` 按 `4n+1` 吸附（24fps，5–161），参数快照含 `width/height/steps/num_frames/negative_prompt/seed`，垫图存在时写 `init_image_path`（优先于高级参数）。
+- **视频**：参数面板与快照逻辑（`num_frames` 按 `4n+1` 吸附，**16fps**，5–161；垫图存在时写 `init_image_path`）；引擎按模式一一对应（t2v→`wan-t2v`、i2v→`wan-i2v`，`MODE_ENGINE_ALLOW` 过滤）；`imagine()` 提交前做显存预检（无 NVIDIA / 总显存 <12288MB / 空闲 <10500MB → toast 拦截并提示双击 `scripts\release_local_engine.bat`），引擎未注册同样诚实拒绝，不落库、不伪造。
 - **音乐**：四道门槛顺序与文案逐字——引擎未注册 / 检测不到 NVIDIA 显卡 / 显存总量 < 12288 MB / 空闲显存 < 7000 MB（提示双击 `scripts\release_local_engine.bat`）；通过后弹四行能力确认（4–10 分钟、12GB 约 8 分钟截断、不支持多轨、BPM·时长·串行队列），成功 toast 说明首次加载约 10GB 权重与 48kHz wav。
 - **V / U / 重试 / 取消**：`V` 强度 0.7 排 4 张变体；`U` 按 1.5×（受 1,350,000 像素安全上限回缩）强度 0.45 重建；失败任务「重试」走 `TaskService.retry_task`，命中原批次则并入，否则按参数回退模式建新批次；取消与引擎重启通过 `asyncio.run_coroutine_threadsafe` 回投到服务事件循环，结果用 toast 回执（跨线程经类信号，不用 `QTimer.singleShot`）。
 - **产物展示**：图片 4 格网格（单任务/视频/U 放大多为单列）、悬停淡入 `V 变化`/`U 放大`、`seed x · W×H` 角注、lightbox 大图（←/→、V/U、复制提示词、打开所在文件夹）、视频卡片（首帧缩略图 + 打开视频/文件夹）、音乐内嵌播放条（进度、时长、失败自动降级系统播放器）、加载骨架（取消按钮 + 排队位次 + 管线说明）、失败卡片（重试 / 「已重试 →」）、toast 三态。
@@ -348,7 +385,7 @@ ACE-Step 1.5 已注册但未懒启动时，参数面板不再显示含糊的「�
 
 ---
 
-## 📦 全模块本地离线便携打包（第三段 · 已实装；真实打包待音乐权重校验通过后执行）
+## 📦 全模块本地离线便携打包（第三段 · 已实装；真实完整打包已执行，随开发增量同步）
 
 目标：**文生图/图生图/文生视频/图生视频/AI音乐全部推理本地离线运行**（仅首次下载权重联网），
 一键打包出完整目录包，复制到其他 Windows 电脑直接双击启动；不引入任何在线校验、远程上报、云端依赖。
@@ -356,15 +393,15 @@ ACE-Step 1.5 已注册但未懒启动时，参数面板不再显示含糊的「�
 ### 一键打包：`scripts\build_portable.ps1`
 
 ```powershell
-# 项目根目录执行；整包含权重约 60GB+，目标盘预留 ≥80GB
+# 项目根目录执行；整包含权重约 155GB（FLUX 33.73GB + ACE-Step 10.03GB + Wan2.1 44.18GB + 四 venv/运行时），目标盘预留 ≥180GB
 pwsh -File scripts\build_portable.ps1                 # 完整打包 → dist\ChenguAIStudio_Portable\
 pwsh -File scripts\build_portable.ps1 -SkipModels     # 调试：跳过权重复制
 pwsh -File scripts\build_portable.ps1 -SkipVenvs      # 调试：跳过虚拟环境复制
 pwsh -File scripts\build_portable.ps1 -OutDir E:\包   # 指定输出目录
 ```
 
-包内容：应用代码 + **三个虚拟环境**（`.venv`/`.venv-image`/`.venv-music`）+ **包内自带 CPython 3.11 运行时**
-（目标机无需装 Python）+ 已就位的权重（FLUX、ACE-Step；Anima 视频权重未下载则该模块自动不注册）+
+包内容：应用代码 + **四个虚拟环境**（`.venv`/`.venv-image`/`.venv-video`/`.venv-music`）+ **包内自带 CPython 3.11 运行时**
+（目标机无需装 Python）+ 已就位的权重（FLUX、ACE-Step、Wan2.1；缺哪块权重/venv 对应模块自动不注册）+
 `启动辰鹄.bat` / `启动桌面端.bat` + **`打包与迁移说明.md`**（独立说明文档：迁移方法、显存门槛、各模型占用、FAQ）。
 打包时写入 `build_manifest.json`（记录打包机原路径，供目标机首启替换）。
 
@@ -401,6 +438,4 @@ pwsh -File scripts\build_portable.ps1 -OutDir E:\包   # 指定输出目录
 - 无任何遥测/上报/云端推理代码路径；Web 仅监听 127.0.0.1；启动即注入 HF 离线锁。
 - 权重完整性校验（SHA-256 / safetensors 文件头）全部在开发机打包前完成，目标机不做任何联网校验。
 
-**执行状态**：脚本与文档已开发并通过编译/干跑验证（打包实测 `-SkipModels` 待做）；**真实完整打包安排在
-ACE-Step 权重校验通过（【权重就绪】）之后执行**，保证音乐权重随包且不再需要下载；Anima 视频权重下载
-需单独批准后补进包。
+**执行状态**：**真实完整打包已实测完成**（`dist\ChenguAIStudio_Portable`，含全部代码/venv/FLUX+ACE-Step 权重，111.2 GB）；此后每轮开发以 `robocopy /MIR` 对 dist 做增量同步；Wan2.1 权重（44.18 GB）与 `.venv-video` 已加入打包清单，dist 下次增量同步后整包约 155GB（D 盘剩余空间已核实充足）。

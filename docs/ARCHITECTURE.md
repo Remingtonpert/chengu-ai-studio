@@ -17,9 +17,9 @@
   ├─ HardwareService：GPU、VRAM、RAM、磁盘观察与运行前检查
   ├─ SQLite：迁移、队列、历史记录
   └─ Engine adapters（每引擎独立 venv / 子进程）
-       ├─ 图片：Diffusers + FLUX.1-schnell（候选）
-       ├─ 视频：FramePack adapter（许可/API 待确认）
-       └─ 音乐：ACE-Step v1.5 adapter（许可/硬件待确认）
+       ├─ 图片：Diffusers + FLUX.1-schnell（已集成 · Apache-2.0）
+       ├─ 视频：Wan2.1-T2V-1.3B（wan-t2v）/ Wan2.1-VACE-1.3B（wan-i2v），.venv-video 独立 worker（2026-11-05 接入；Anima 引用已移除）
+       └─ 音乐：ACE-Step v1.5 adapter（已集成 · MIT）
 ```
 
 目录可按职责演进，不要求一次性创建完整空壳：
@@ -88,7 +88,7 @@ queued/preparing/running -> cancelled
 
 ## Phase 3 实际落地（2026-11-05 更新）
 
-- 真实引擎已接入并经 `ProcessEngineAdapter` JSONL IPC 运行在独立 venv：FLUX.1-schnell 图像与 Anima 视频（`.venv-image`）、ACE-Step 1.5 音乐（`.venv-music`）；权重按 SHA-256/safetensors 逐文件校验，主进程零 torch。
+- 真实引擎已接入并经 `ProcessEngineAdapter` JSONL IPC 运行在独立 venv：FLUX.1-schnell 图像（`.venv-image`）、Wan2.1 视频（`wan-t2v`/`wan-i2v`，`.venv-video`）、ACE-Step 1.5 音乐（`.venv-music`）；视频权重（HF 快照，两仓库共享 blobs 物理 44.18 GB）在 `models/wan2.1` 离线加载，权重缺失时 health_check 诚实报错，不伪造；原 Anima 引用已于 2026-11-05 整体移除（真实上游非商业许可）；权重按 SHA-256/safetensors 逐文件校验，主进程零 torch。
 - FLUX 已产出多张真实图（英文提示词批 + Web 产物预览实测 200）；中文提示词端到端出图、ACE-Step 端到端音频的真机验收脚本已就位（`scripts\acceptance_flux.ps1` 含中文步骤），执行排队等待显存窗口。
 - 引擎环境统一与兜底（2026-11-05）：`register_production_engines` 解析 `image_venv_python` / `music_venv_python` 时，若配置值指向不存在的解释器，会记录告警并回退到项目默认 `.venv-image` / `.venv-music`（`default_image_venv_python` / `default_music_venv_python`），避免 worker 误用系统 Python；配置值为空时本就直接用默认环境。排查中文出图链路时确认过：曾出现的系统 Python worker 属旧代码进程遗留，现行注册逻辑不会落到系统解释器。
 - 垫图（`init_image_path`）输入校验（2026-11-05）：图生图/图生视频的垫图必须是**盘符开头、真实存在、后缀受支持的具体图片文件**。三层拦截：桌面 `creation_page._ref_path_error`（composer 挂载与高级参数两处，明确提示「不能是文件夹」）、网页 `app.js` 先行拦截目录尾巴与不支持后缀、Web 后端 `app/web/server.py` `_submit_task` 统一预检（非空/绝对/非目录/存在/后缀白名单）并归一化路径；引擎侧仍保留「输入文件不存在」作最后防线。全程不猜测目录、不伪造结果。
@@ -106,7 +106,7 @@ queued/preparing/running -> cancelled
 - ~~`app/main.py`、`requirements.txt` 重复冲突~~ → 已清理；入口唯一（桌面 `app.bootstrap`、Web `app.web.server`）。
 - ~~无生产 adapter / 真实引擎未实现~~ → 已实现三模态生产 adapter 与两个独立 venv worker（见上节）。
 
-结论修订：桌面与 Web 两端现在都提供真实本地 AI 生成（引擎注册即权重与依赖已校验）；“未验证即禁用”的安全策略由**引擎注册门槛**实现——权重缺失或许可证未确认（如 Anima 视频权重待用户决策）时引擎不注册，UI 与 API 拒绝提交，全程无模拟输出。
+结论修订：桌面与 Web 两端现在都提供真实本地 AI 生成（引擎注册即权重与依赖已校验）；“未验证即禁用”的安全策略由**引擎注册门槛**实现——venv 或权重缺失时引擎不注册（视频引擎缺 `.venv-video`/`models/wan2.1` 时同样不注册，UI 如实提示搭建与下载脚本），UI 与 API 拒绝提交，全程无模拟输出。
 
 ## 设计决策门槛
 

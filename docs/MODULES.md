@@ -11,7 +11,7 @@
 服务层            app/tasks（TaskService / EngineManager / worker 协议）
                     app/engine_registration（注册装配，无 Qt 依赖）
                         app/core（config / paths / logging / hardware）
-引擎层    .venv-image worker（FLUX 图像 / Anima 视频）   .venv-music worker（ACE-Step 1.5）
+引擎层    .venv-image worker（FLUX 图像）   .venv-music worker（ACE-Step 1.5）
               仅通过 app/tasks/process_worker 的 JSON-lines IPC 与主进程通信
 ```
 
@@ -63,23 +63,24 @@
 - 协议：stdin/stdout **每行一条 JSON**。请求：`{"id", "method": "health"|"validate_request"|"generate"|"shutdown", "payload": TaskRequest 形态或 null}`；响应：`{"id", "ok": true, ...}` 或 `{"id", "ok": false, "error"}`（另有超时保护：`engine IPC <method> 请求超时`）。
 - worker 侧 `--adapter-factory` 指定 `module:callable`，由 worker 进程 import 并构造实现 `EngineAdapter` 的对象。
 
-### 三个 worker 适配器（运行在引擎 venv 内）
+### 两个 worker 适配器（运行在引擎 venv 内；视频引擎已于 2026-11-05 下线）
 | 模块 | venv | 参数白名单（parameters） |
 |---|---|---|
 | `app/tasks/flux_worker.py` | .venv-image | `width, height, steps, seed, negative_prompt, init_image_path`（img2img） |
-| `app/tasks/video_worker.py` | .venv-image | `width, height, num_frames, steps, seed, negative_prompt, init_image_path`（留空自动文生图首帧） |
 | `app/tasks/music_worker.py` | .venv-music | `bpm(30-300), duration(10-600；12GB 档截到 480), instrumental, vocal_language, keyscale, timesignature, lyrics(≤4096), seed, steps`；硬门槛 12GB 显存；worker 每 4 任务自重启（防泄漏）；输出真实 48kHz wav |
 
 ### `app/engine_registration.py`（无 Qt，桌面/Web 同一入口）
-- 常量 `IMAGE_ENGINE_ID="flux-schnell"`、`VIDEO_ENGINE_ID="anima-image2video"`、`MUSIC_ENGINE_ID="ace-step-15"`。
-- `register_production_engines(engine_manager, config, paths, logger)`：仅 `engines_enabled=true` 注册；`image_venv_python`/`music_venv_python` 配置值指向失效路径时告警并回退 `default_image_venv_python`/`default_music_venv_python`（保证 worker 永远落在项目 venv，不会漂到系统 Python）；`CHENGUAI_DISABLE_MODALITIES`（如 `"video,music"`）按硬件分级跳过模态；向 worker 注入 `CHENGUAI_MODEL_CACHE_DIR / CHENGUAI_OUTPUT_DIR / CHENGUAI_{FLUX,VIDEO,MUSIC}_ENGINE_ID / CHENGUAI_MUSIC_{CHECKPOINTS_DIR,REPO_DIR,LM_MODEL,MAX_TASKS_PER_WORKER}` 并默认 `HF_HUB_OFFLINE=1`。
+- 常量 `IMAGE_ENGINE_ID="flux-schnell"`、`MUSIC_ENGINE_ID="ace-step-15"`（原 `VIDEO_ENGINE_ID="anima-image2video"` 已于 2026-11-05 随 Anima 引用整体移除）。
+- `register_production_engines(engine_manager, config, paths, logger)`：仅 `engines_enabled=true` 注册；`image_venv_python`/`music_venv_python`/`video_venv_python` 配置值指向失效路径时告警并回退对应默认（保证 worker 永远落在项目 venv，不会漂到系统 Python）；`CHENGUAI_DISABLE_MODALITIES`（如 `"music"`）按硬件分级跳过模态；注册 image（flux）、video（`wan-t2v`/`wan-i2v`，需 `.venv-video` python 存在；权重缺失照常注册、health_check 诚实报错）、music（ace-step-15）三模态；向 worker 注入 `CHENGUAI_MODEL_CACHE_DIR / CHENGUAI_OUTPUT_DIR / CHENGUAI_{FLUX,MUSIC,VIDEO}_ENGINE_ID / CHENGUAI_{FLUX,MUSIC,VIDEO}_MODEL_CACHE_DIR / CHENGUAI_MUSIC_{CHECKPOINTS_DIR,REPO_DIR,LM_MODEL,MAX_TASKS_PER_WORKER}` 并默认 `HF_HUB_OFFLINE=1`。
 - `default_image_venv_python / default_music_venv_python / default_music_repo_dir / default_music_model_dir`：便携包相对定位。
 
 ## 3. app/engine —— 引擎实现（只在引擎 venv 内 import）
 
 - `app/engine/abstract.py`：`AIGenerationEngine`（`generate/memory_usage/requires_cuda`）+ `ImageGenerationEngine`（`generate_image(prompt,width,height,steps,seed,negative_prompt)`、`default_steps`）+ `VideoGenerationEngine`（`generate_video(prompt,image_path,num_frames,...)`）+ `AudioGenerationEngine`（`generate_audio(prompt,duration,sample_rate)`）。注：文件尾部 `NoOpImageEngine` 为历史占位死代码，现行链路不使用（真实引擎缺失时由「不注册引擎」拒绝任务，绝不占位）。
 - `app/engine/prompt_utils.py`：`coerce_prompt_text(value, *, joiner=", ") -> str | None`——把 str/bytes/任意嵌套 list/tuple/标量混排规整为合法 `str`（tokenizers 只接受标量 str，嵌套 list 会抛 `TextEncodeInput` TypeError）。
-- `app/engine/image/flux.py`：`FluxImageEngine(ImageGenerationEngine)`（diffusers 管线、本地快照离线加载、中文/英文原生）+ `FluxEngineError`；生成前解析创建输出目录。Anima 见 `app/engine/video/anima.py`。
+- `app/engine/image/flux.py`：`FluxImageEngine(ImageGenerationEngine)`（diffusers 管线、本地快照离线加载、中文/英文原生）+ `FluxEngineError`；生成前解析创建输出目录。
+- `app/engine/video/wan.py`：`WanVideoEngine(VideoGenerationEngine)`——`wan-t2v`（`WanPipeline`）/ `wan-i2v`（`WanVACEPipeline`，首帧=垫图条件，`prepare_video_and_mask` 首帧 mask=0、其余待生成）；本地 HF 快照离线加载（fp32 VAE + bf16 pipeline + `enable_model_cpu_offload` + UniPC `flow_shift=3.0`）；尺寸 16 倍数 + 像素预算收口、帧数 `4n+1`、固定 16fps、官方中文负面提示词；OOM 捕获给 `release_local_engine.bat` 指引，不伪造；输出 `wan_{t2v|i2v}_{时间戳}.mp4`（<1KB 判失败）。旧 Anima adapter 已于 2026-11-05 整体删除。
+- `app/tasks/video_worker.py`：Wan 视频生产适配器（`.venv-video` 子进程）；参数白名单 `width/height/num_frames/steps/seed/negative_prompt`（i2v 另加 `init_image_path`；t2v 带垫图报错引导换引擎）；health_check 查 CUDA + 快照存在（缺失提示运行 `scripts\download_video_weights.py`）。
 
 ## 4. app/web —— 本地 Web 控制台（纯标准库 asyncio，127.0.0.1）
 
@@ -115,7 +116,7 @@
 | `CHENGUAI_APP_HOME` / `CHENGUAI_DATA_ROOT` | 路径根（便携包首启改写） |
 | `CHENGUAI_MODEL_CACHE_DIR` / `CHENGUAI_OUTPUT_DIR` | worker 权重缓存 / 输出目录（factory 注入） |
 | `CHENGUAI_FLUX_ENGINE_ID` / `CHENGUAI_VIDEO_ENGINE_ID` / `CHENGUAI_MUSIC_ENGINE_ID` | worker 侧引擎 id |
-| `CHENGUAI_DISABLE_MODALITIES` | 硬件分级禁注册（`"video,music"` 形式） |
+| `CHENGUAI_DISABLE_MODALITIES` | 硬件分级禁注册（`"music"` 形式；视频已无引擎可禁） |
 | `CHENGUAI_MUSIC_*` | 音乐 checkpoints/repo/LM/自重启阈值 |
 | `HF_HUB_OFFLINE=1` 等 | 强制离线加载本地权重（setdefault，可显式覆盖） |
 | `ACESTEP_CHECKPOINTS_DIR / CONFIG / LM_MODEL / BACKEND=pt / OFFLOAD_TO_CPU=true / OFFLOAD_DIT_TO_CPU=true` | ACE-Step 1.5（12GB 档必须开 DiT offload，上游 #1337） |

@@ -27,7 +27,7 @@
 | 候选 | 官方硬件说明 | RTX 3060 12GB 结论 |
 |---|---|---|
 | FLUX.1-schnell + Diffusers | Diffusers 官方 FLUX 文档提供 sequential/model CPU offload 和量化示例；说明 Flux 大型组件完整加载约 50GB，低 VRAM 优化示例不是目标机基准；FP8 可能受 GPU/CUDA/PyTorch 组合影响。 | **已实测通过（2026-11）**：RTX 3060 12GB 上 512×512、1024 档、1216×704 均产出真实图片，`HF_HUB_OFFLINE=1` 离线复现成功，显存/耗时如实记录（根 `README.md`）。中文提示词端到端属脚本已就位的排队验收项。 |
-| FramePack | 官方 README 声明支持 NVIDIA RTX 30XX 且至少 6GB；宣称 13B 模型在最低 6GB 设备上工作，较慢显卡速度下降。官方 Windows release 使用 CUDA 12.6/PyTorch 2.6；模型下载超过 30GB。 | 未采用；视频候选已转向 Anima（`app/engine/video/anima.py`，共用 `.venv-image`），其权重为社区类许可，下载与否待用户决策，未推理。 |
+| FramePack | 官方 README 声明支持 NVIDIA RTX 30XX 且至少 6GB；宣称 13B 模型在最低 6GB 设备上工作，较慢显卡速度下降。官方 Windows release 使用 CUDA 12.6/PyTorch 2.6；模型下载超过 30GB。 | 未采用。视频引擎 2026-11-05 收口为 **Wan2.1 1.3B**（T2V + VACE，Apache-2.0）：diffusers 官方管线、fp32 VAE + bf16 + model_cpu_offload，官方 480p 档 81 帧、16fps，官方宣称 8GB+ 可跑（bf16/offload），12GB 档预计可跑 480p（真实耗时/显存峰值以本机实测为准，验收排队中）；原 Anima 引用已整体移除（非商业许可）。 |
 | 原始 HunyuanVideo | 官方主仓库列出 544×960×129 帧 45GB、720p×129 帧 60GB 峰值，并说明在 80GB GPU 测试、测试系统 Linux。FP8 约节省 10GB 的官方表述不能直接代表总需求降至 12GB。 | 排除原始推荐配置。FramePack 是独立低显存候选，不可把其项目声明归因于 Hunyuan 原生推理。 |
 | ACE-Step v1.5 | 官方仓库测试表包含 RTX 4090、A100、RTX 3090、M2 Max；未见 RTX 3060 v1.5 实测。README 的 8GB 优化公告在 v1.5 发布前。 | 环境已建成：`.venv-music`（transformers<4.58）+ 权重 10.03GB 校验 + 12GB 档必需的 DiT offload 环境变量（上游 #1337）；提交门槛按实测设 12288MiB 总量 / 7000MiB 空闲。**端到端出音频的真机验收仍排队等显存窗口，通过前不标记「已验证」。** |
 | MusicGen | 官方 MusicGen 模型卡提供 300M/1.5B/3.3B 规格，未以此证明 Windows 12GB 组合。 | 硬件可能性不是主要阻塞；权重 CC-BY-NC 4.0 的非商用条款是商业路线的阻塞项。 |
