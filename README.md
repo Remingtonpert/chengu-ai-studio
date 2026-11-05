@@ -95,7 +95,8 @@ Third Project/
 │   ├── DEVELOPMENT_PLAN.md     # 阶段验收计划
 │   ├── ENGINE_RESEARCH.md      # 引擎候选调研
 │   ├── HARDWARE_COMPATIBILITY.md # 硬件兼容性说明
-│   └── LICENSE_AUDIT.md        # 许可证审计记录
+│   ├── LICENSE_AUDIT.md        # 许可证审计记录
+│   └── MODULES.md              # 模块清单与接口文档（模块化复用入口）
 ├── scripts/                     # 部署与运维脚本
 │   ├── run_app.ps1              # Windows PowerShell 启动桌面程序
 │   ├── verify_env.py            # 环境自检（Python/venv/依赖）

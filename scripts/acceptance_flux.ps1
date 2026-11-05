@@ -175,15 +175,15 @@ $waitedSec = 0
 if (-not $CheckOnly -and -not $preOk -and -not $Force -and ($weightInfo -match '^23 ')) {
     Log 'resources busy: to release them double-click scripts\release_local_engine.bat (stops the'
     Log 'local LLM engine: ~11GB VRAM + ~37GB RAM), then leave the local-AI chat app (Strata engine) closed.'
-    Log 'the acceptance auto-starts once free (max 60 min). Do NOT reopen the chat app or send'
+    Log 'the acceptance auto-starts once free (max 120 min). Do NOT reopen the chat app or send'
     Log 'messages to the local chat model while the run is going - that steals the GPU back.'
-    while (-not $preOk -and $waitedSec -lt 3600) {
+    while (-not $preOk -and $waitedSec -lt 7200) {
         Start-Sleep -Seconds 15
         $waitedSec += 15
         $gpuFree = [int]((nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits) | Select-Object -First 1)
         $ramFreeGb = [math]::Round(((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1MB), 1)
         $preOk = ($gpuFree -ge $GpuFreeMinMib) -and ($ramFreeGb -ge $RamFreeMinGb)
-        if (-not $preOk -and ($waitedSec % 60 -eq 0)) { Log "waiting... gpu_free=${gpuFree}MiB ram_free=${ramFreeGb}GB (${waitedSec}s/3600s)" }
+        if (-not $preOk -and ($waitedSec % 60 -eq 0)) { Log "waiting... gpu_free=${gpuFree}MiB ram_free=${ramFreeGb}GB (${waitedSec}s/7200s)" }
     }
     if ($preOk) { Log "resources free after ${waitedSec}s - starting acceptance run" }
 }

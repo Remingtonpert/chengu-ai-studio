@@ -39,7 +39,7 @@ tests/
 docs/
 ```
 
-仓库仍保留旧 Gradio/CLI 原型；新的 PySide6 桌面入口为 `app.bootstrap`，桌面依赖位于项目 `.venv`。
+旧 Gradio/CLI 原型（`app/web_ui.py`、`app/scheduler.py`、`app/main.py` 等含占位输出的路径）**已于重构中全部移除**（2026-10 起逐步替换，现已不存在于源码树）。当前两个入口：PySide6 桌面端 `app.bootstrap` 与本地 Web 控制台 `app.web.server`，两者共用同一服务层（模块与接口清单见 `docs/MODULES.md`），桌面依赖位于项目 `.venv`。
 
 ## 模块职责和边界
 
@@ -86,16 +86,24 @@ queued/preparing/running -> cancelled
 - 队列、历史和引擎管理页读取真实本地状态。未注册真实引擎，UI 不允许提交生成请求。
 - 测试适配器只在 `tests/` 定义，结果带 `test_only` 标识并且不产出媒体文件。
 
-## 当前实现差距（已从本地源码观察）
+## Phase 3 实际落地（2026-11-05 更新）
 
-- `app/web_ui.py` 捕获模型异常后构造灰色占位图；异常被显示为“生成中”，会伪造成功感。
-- `app/scheduler.py` 对任务执行 `asyncio.sleep` 后标记完成，GPU 检测函数引用未导入的 `torch`，异常时还返回硬编码的可用显存。
-- `app/engine/image/flux.py` 下载失败后会返回占位结果，输出路径与调用参数存在不一致；引擎抽象与 UI 调用不统一。
-- `app/main.py`、`requirements.txt` 有重复/冲突内容；文档宣称桌面端和模型能力完成，但当前代码没有对应实现。
-- 当前没有生产 adapter 或本地推理子环境，子进程 host 只通过 test-only worker 做协议测试。
-- 图片/视频/音乐真实引擎、模型校验和断网推理仍未实现。旧 Web/CLI 路径仍可能伪造占位输出，不属于新桌面任务服务。
+- 真实引擎已接入并经 `ProcessEngineAdapter` JSONL IPC 运行在独立 venv：FLUX.1-schnell 图像与 Anima 视频（`.venv-image`）、ACE-Step 1.5 音乐（`.venv-music`）；权重按 SHA-256/safetensors 逐文件校验，主进程零 torch。
+- FLUX 已产出多张真实图（英文提示词批 + Web 产物预览实测 200）；中文提示词端到端出图、ACE-Step 端到端音频的真机验收脚本已就位（`scripts\acceptance_flux.ps1` 含中文步骤），执行排队等待显存窗口。
+- 桌面端三模态生成按钮已接通共享 TaskService（与 Web 同一队列/同一 worker 协议）；TaskService 增加跨进程执行者锁、原子领取与 5 秒轮询，两模式可同时运行。
+- 全部模块与接口的权威清单见 `docs/MODULES.md`；根 `README.md` 为进度真相源。
 
-因此桌面程序可以验证任务生命周期，但不能声称已经提供 AI 生成。后续接入真实引擎前，应禁用或移除旧 Web/CLI 的占位输出路径。
+## 历史实现差距（2026-08 源码审查记录 · 现状标注）
+
+> 以下为重构启动前观察到的旧原型问题，保留作审计记录；**全部已解决或随旧代码移除**：
+
+- ~~`app/web_ui.py` 捕获模型异常后构造灰色占位图~~ → 文件已删除；现行 Web 控制台（`app/web/server.py`）绝不生成占位图，失败任务诚实带 `error_message`。
+- ~~`app/scheduler.py` `asyncio.sleep` 模拟完成、硬编码可用显存~~ → 文件已删除；现行 `TaskService`/`app.core.hardware` 只报告真实测得数据或 unavailable。
+- ~~旧 `app/engine/image/flux.py` 下载失败返回占位结果~~ → 已重写：离线快照加载（`HF_HUB_OFFLINE=1`）、生成前输出目录解析、空/异常提示词诚实报错，绝不占位。
+- ~~`app/main.py`、`requirements.txt` 重复冲突~~ → 已清理；入口唯一（桌面 `app.bootstrap`、Web `app.web.server`）。
+- ~~无生产 adapter / 真实引擎未实现~~ → 已实现三模态生产 adapter 与两个独立 venv worker（见上节）。
+
+结论修订：桌面与 Web 两端现在都提供真实本地 AI 生成（引擎注册即权重与依赖已校验）；“未验证即禁用”的安全策略由**引擎注册门槛**实现——权重缺失或许可证未确认（如 Anima 视频权重待用户决策）时引擎不注册，UI 与 API 拒绝提交，全程无模拟输出。
 
 ## 设计决策门槛
 
