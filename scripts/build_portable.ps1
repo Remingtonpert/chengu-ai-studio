@@ -38,7 +38,10 @@ New-Item -ItemType Directory -Force -Path $dist | Out-Null
 RC (Join-Path $root 'app') (Join-Path $dist 'app')
 RC (Join-Path $root 'scripts') (Join-Path $dist 'scripts')
 RC (Join-Path $root 'vendor\ACE-Step-1.5') (Join-Path $dist 'vendor\ACE-Step-1.5')
-Copy-Item (Join-Path $root 'README.md') (Join-Path $dist 'README.md') -Force
+foreach ($f in 'README.md', 'LICENSES.md', 'pytest.ini', 'requirements.txt', 'requirements-dev.txt') {
+    Copy-Item (Join-Path $root $f) (Join-Path $dist $f) -Force
+}
+RC (Join-Path $root 'docs') (Join-Path $dist 'docs')
 
 # 2) 包内自带 CPython 3.11 运行时（虚拟环境的 pyvenv.cfg home 指向它）
 $basePy = (& (Join-Path $root '.venv\Scripts\python.exe') -c "import sys;print(sys.base_prefix)").Trim()
