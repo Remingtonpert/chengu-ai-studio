@@ -104,8 +104,9 @@ Third Project/
 │   ├── run_app.ps1              # Windows PowerShell 启动桌面程序
 │   ├── verify_env.py            # 环境自检（Python/venv/依赖）
 │   ├── build_launcher.ps1       # .exe 启动器构建
-│   ├── acceptance_flux.bat/.ps1 # FLUX 真机验收（端到端出图 + 离线校验）
+│   ├── acceptance_flux.bat/.ps1 # FLUX 真机验收（端到端出图 + 中文用例 + 离线校验）
 │   ├── acceptance_music.bat/.ps1 # ACE-Step 端到端验收（中文人声 48kHz wav + 时长截断实测）
+│   ├── acceptance_chain.ps1     # FLUX→音乐链式自动验收（资源窗口打开后自动跑，日志落 logs\）
 │   ├── release_local_engine.bat/.ps1  # 释放本机 LLM 引擎显存（生成前必跑）
 │   ├── setup_music_venv.ps1     # 音乐引擎环境一键搭建（.venv-music，幂等）
 │   ├── download_music_weights.py # ACE-Step 1.5 权重下载（断点续传）
@@ -315,6 +316,35 @@ python -m app.bootstrap
 ### 真实验证
 
 `pytest tests` **31 passed, 1 skipped**（导航测试已重写为「五 Tab + 七系统页 + 会话新建」断言）；`scripts\smoke_desktop_generation.py` 离屏冒烟 **SMOKE PASS**：五模式顺序为 `t2i/i2i/t2v/i2v/music` 且切换生效、想象真实落库 4 个 `queued`（seed 互不相同、引擎 `flux-schnell`）、`i2i`/`i2v` 无垫图被诚实拒绝、`t2v` 参数快照 `frames=33 steps=28` 且无 `init_image_path`、音乐因空闲显存不足被门槛拦截（未弹窗、未伪造、任务数不变）、空提示词被拒、对 `queued` 任务重试诚实拒绝、无事件循环时取消报错不崩溃、会话文件已落盘。`scripts\shot_desktop_ui.py` 生成 `.tmp_shots\desktop_dark.png` / `desktop_light.png` / `desktop_system.png` 三张离屏截图用于核对三栏结构、4 格网格、骨架屏与系统页返回顶栏；注意离屏平台无中文字体，截图里中文显示为方框属平台限制，与样式表无关（Windows 实机正常）。**未启动任何 GPU worker，未写入真实任务库。**
+
+---
+
+## 🔧 中文出图与垫图校验修复清单（2026-11-05 傍晚）
+
+### A. 引擎环境统一与中文端到端验收排队
+
+- 排查「FLUX worker 为何用系统 Python」：根因是**旧代码时代启动的遗留进程**，现行 `register_production_engines` 在 `image_venv_python` 为空时本来就回退项目 `.venv-image`；已确认配置文件干净。本轮加硬保险：`image_venv_python`/`music_venv_python` 配置值指向不存在的解释器时**告警并回退项目默认 venv**，杜绝再次漂到系统 Python。旧 web server/worker 进程已停止并确认端口空闲。
+- 中文端到端用例已进脚本：`acceptance_flux.ps1` Step 2b 用「一只橘猫趴在窗台上晒太阳，午后暖色阳光，写实摄影风格，毛发细节清晰，浅景深，8k，高清」@1216×704（steps=4，seed=20261105），验证 `coerce_prompt_text` 修复后不再出 `TextEncodeInput`。
+- 新增 `scripts\acceptance_chain.ps1`：FLUX→音乐链式自动验收，每轮预检（需 ≥12.3GB 空闲显存 + ≥36GB 空闲内存）不满足就诚实等待（每轮 2h、最多 48 轮），日志落 `logs\acceptance_flux_rN.log` / `acceptance_music_rN.log`。当前本机常驻引擎占用约 11GB 显存 + 42GB 内存，**验收链已挂起自动重挂中；请双击 `scripts\release_local_engine.bat` 释放并保持本地聊天应用关闭**，窗口一开就跑，出图成功与否如实记录。
+
+### B. 垫图必须是「已存在的具体图片文件」（三层拦截，杜绝把文件夹当垫图）
+
+- **桌面端**（`creation_page._ref_path_error`）：composer 挂载路径与高级参数白名单里的 `init_image_path` 两处校验——目录报「垫图请选择具体图片文件，不能是文件夹」，不存在报「垫图文件不存在…」，后缀不支持报支持格式清单；高级参数命中报错时剔除该键并 toast，其余参数照常提交。
+- **网页前端**（`app.js refShapeError`）：先行拦截目录尾巴（`\` `/` 结尾）与不支持扩展名；后端不可知「是否存在」，交给服务端。
+- **Web 后端**（`app/web/server.py _submit_task`）：统一预检（非空字符串 → 盘符绝对路径 → 非目录 → 文件存在 → 后缀 png/jpg/jpeg/webp/bmp），400 + 中文提示，通过后归一化路径；引擎侧「输入文件不存在」保留为最后防线。
+- 顺带修复：`composer.has_ref()` 原用 `isVisible()`，窗口未显示时会把已挂载垫图误判为未挂，已改 `isHidden()` 语义。
+- 网页高级参数 hint 与垫图路径输入框 placeholder 均已注明「具体图片文件，不能是文件夹」。
+
+### C. 音乐页 ready 文案
+
+ACE-Step 1.5 已注册但未懒启动时，参数面板不再显示含糊的「尚未启动」，改为「ACE-Step 1.5（音乐）已注册 · 提交后懒启动（首次加载权重约 10.03 GB，最低 12GB 显存）」。
+
+### D. 收尾与验证
+
+- `.gitignore` 修正 `dist/` 与 `.tmp_shots/` 粘连成一条的笔误；`.venv-music/`、`vendor/` 已在忽略清单。
+- `docs/` 七份文档全部同步到真实进度：架构增补（环境回退、垫图校验、MJ 界面）、MODULES 重写 app/ui 章节、开发计划阻断项改为现状+历史双层、许可审计增补集成后状态并清理旧草稿残留、硬件兼容标注 FLUX 已实测、调研摘要标注现状。
+- 验证：桌面冒烟**新增断言后 SMOKE PASS**（目录垫图拦截 / 不存在路径拦截 / 有效 png 放行 4 连发含 `init_image_path` / 高级参数目录被剔除）、`pytest` **31 passed + 1 skipped**、`node --check app.js` 通过。
+- 本轮 4 个本地 commit（`fix(refs)` 垫图校验、`fix(engines)` 环境回退+音乐文案、`test(scripts)` 验收与冒烟断言、`docs` 全套同步），未 push；push 与转公开仍等你决定。
 
 ---
 
