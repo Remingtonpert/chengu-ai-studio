@@ -1,5 +1,5 @@
-"""视频生成引擎包（图生视频 / 文生视频）。
+"""视频生成引擎子包：Wan2.1（wan-t2v 文生视频 / wan-i2v 图生视频）。
 
-本包只在 .venv-image（含 torch / diffusers）中被导入；Web 主进程不加载它。
-真实生成通过 app.tasks.video_worker.VideoTaskAdapter 接入任务系统。
+历史上曾规划 Cosmos-Predict2（调研占位）与 Anima（许可不符已移除），
+现真实引擎为 Wan-AI Wan2.1 1.3B 系列（Apache-2.0），见 wan.py。
 """

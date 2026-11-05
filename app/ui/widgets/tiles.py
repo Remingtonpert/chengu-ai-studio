@@ -396,7 +396,7 @@ class VideoTile(TileBase):
         strip_layout.addStretch(1)
         strip.raise_()
         frames = int(params.get("num_frames") or 0)
-        seconds = f"{frames / 24:.2f}s @24fps" if frames else "时长?"
+        seconds = f"{frames / 16:.2f}s @16fps" if frames else "时长?"
         foot = self.make_foot(
             f"seed {params.get('seed', '—')} · {params.get('width', '?')}×{params.get('height', '?')} · {seconds}"
         )

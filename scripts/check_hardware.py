@@ -129,7 +129,7 @@ def main() -> int:
     if tier == "full":
         print("  全部模块可用：文生图/图生图/文生视频/图生视频/AI音乐。", file=sys.stderr)
     elif tier == "mid":
-        print("  中等配置：已自动禁用音乐与视频模块（ACE-Step 1.5 最低 12GB 显存；64GB 档内存），仅保留图片生成。", file=sys.stderr)
+        print("  中等配置：已自动禁用音乐与视频模块（ACE-Step 1.5 与 Wan2.1 均最低 12GB 显存；64GB 档内存），仅保留图片生成。", file=sys.stderr)
     else:
         print("  设备性能不足：显卡或内存低于最低门槛，文生图/视频/音乐均不可用，仅可浏览历史会话与已生成产物。", file=sys.stderr)
     print(f"  评级明细：{report_path}", file=sys.stderr)

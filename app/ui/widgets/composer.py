@@ -28,7 +28,7 @@ IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 PLACEHOLDERS = {
     "t2i": "发出想象…　Enter 生成 4 图网格 · Shift+Enter 换行",
     "i2i": "先放垫图（选择/拖入/粘贴），再描述想要的变化…",
-    "t2v": "描述动态画面（后端：FLUX 首帧 → Anima 图生视频）…",
+    "t2v": "描述动态画面…（Wan2.1-T2V-1.3B · 16fps mp4）",
     "i2v": "先放首帧图片，再描述画面如何运动…",
     "music": (
         "描述音乐：风格、情绪、乐器、节奏…（ACE-Step 1.5：支持 4-10 分钟带人声完整乐曲）"

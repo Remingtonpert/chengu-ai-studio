@@ -33,7 +33,6 @@ from app.core.hardware import get_disk_free_gib, get_gpu_info
 from app.engine_registration import (
     IMAGE_ENGINE_ID,
     MUSIC_ENGINE_ID,
-    VIDEO_ENGINE_ID,
 )
 from app.tasks.engine_manager import EngineManager
 from app.tasks.models import TaskStatus
@@ -167,12 +166,7 @@ class _OverviewPage(QWidget):
                 if (models_dir / "flux-schnell").exists()
                 else "FLUX 引擎已接入，权重待下载"
             )
-        if window._video_ready:
-            model_parts.append(
-                "Anima 视频模型已就位"
-                if (models_dir / "anima-image2video").exists()
-                else "Anima 视频引擎已接入，权重待确认下载"
-            )
+        model_parts.append("暂无可用本地视频引擎 · 调研中")
         if window._music_ready:
             model_parts.append(
                 "ACE-Step 1.5 音乐权重已就位（10.03 GB 校验通过）"
@@ -226,7 +220,6 @@ class MainWindow(QMainWindow):
             for status in (engine_manager.list_statuses() if engine_manager else ())
         }
         self._image_ready = IMAGE_ENGINE_ID in registered
-        self._video_ready = VIDEO_ENGINE_ID in registered
         self._music_ready = MUSIC_ENGINE_ID in registered
         self._theme_dark: bool | None = None
         self.setWindowTitle("辰鹄 AI 创作中心")
@@ -513,8 +506,6 @@ class MainWindow(QMainWindow):
         names = []
         if self._image_ready:
             names.append("FLUX 图像")
-        if self._video_ready:
-            names.append("Anima 视频")
         if self._music_ready:
             names.append("ACE-Step 音乐")
         return names

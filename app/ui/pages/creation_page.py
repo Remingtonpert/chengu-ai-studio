@@ -56,7 +56,11 @@ from app.ui.widgets.tiles import IMAGE_SUFFIXES, VIDEO_SUFFIXES, output_paths
 ABS_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 REF_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp"})
 NEEDS_REF = {"i2i", "i2v"}
-VIDEO_FPS = 24
+VIDEO_FPS = 16  # Wan2.1 原生帧率（Anima 时代的历史 24fps 已随引擎替换）
+# Wan2.1 提交前的显存预检：UMT5-XXL 文本编码器 bf16 单件换入峰值约 10.6GB，
+# 低于该空闲水位直接诚实拦截（与音乐引擎同一策略），不提交、不赌 OOM。
+VIDEO_MIN_VRAM_MB = 12_288
+VIDEO_FREE_FLOOR_MB = 10_500
 MUSIC_MIN_VRAM_MB = 12_288
 MUSIC_FREE_FLOOR_MB = 7_000
 ADVANCED_WHITELIST_IMAGE = {
@@ -401,7 +405,7 @@ class CreationPage(QWidget):
     def _engine_for(self, modality: str) -> str:
         key = {"video": "vengine", "music": "mengine"}.get(modality, "engine")
         fallback = {
-            "video": "anima-image2video",
+            "video": "",
             "music": "ace-step-15",
         }.get(modality, "flux-schnell")
         return self.panel.engine_id() or str(self.store.settings.get(key) or fallback)
@@ -528,6 +532,41 @@ class CreationPage(QWidget):
         if modality == "music":
             self._imagine_music(text)
             return
+        if modality == "video":
+            if not any(
+                "video" in (ENGINE_TASK_TYPES.get(e.engine_id) or ())
+                for e in self._engines
+            ):
+                self.toast.show(
+                    "视频引擎未注册：需 .venv-video（运行 scripts\\\\setup_video_venv.ps1）"
+                    "与 models\\\\wan2.1 权重（运行 scripts\\\\download_video_weights.py，Apache-2.0）；"
+                    "未就绪前不会提交任务，也不会伪造输出。",
+                    "error",
+                )
+                return
+            gpu = get_gpu_info()
+            if gpu is None:
+                self.toast.show(
+                    "显存不足，无法启动 Wan2.1 视频模型：检测不到 NVIDIA 显卡（最低要求 12GB 显存）。",
+                    "error",
+                )
+                return
+            if gpu.memory_total_mib < VIDEO_MIN_VRAM_MB:
+                self.toast.show(
+                    "显存不足，无法启动 Wan2.1 视频模型：显卡 "
+                    f"{gpu.name or '?'} 仅 {gpu.memory_total_mib} MB，"
+                    f"最低要求 {VIDEO_MIN_VRAM_MB} MB（12GB）。",
+                    "error",
+                )
+                return
+            if gpu.memory_free_mib < VIDEO_FREE_FLOOR_MB:
+                self.toast.show(
+                    "显存不足，无法启动 Wan2.1 视频模型：当前空闲显存仅 "
+                    f"{gpu.memory_free_mib} MB（Wan2.1 编码器阶段需约 10.5GB 空闲）。"
+                    "请先释放显存（双击 scripts\\\\release_local_engine.bat）再提交。",
+                    "error",
+                )
+                return
         if mode not in NEEDS_REF and self.composer.has_ref():
             self.composer.clear_ref()  # 文生图/文生视频不挂垫图
         extra: dict[str, Any] = {}
@@ -631,11 +670,11 @@ class CreationPage(QWidget):
             )
             batch["taskIds"].append(rec.task_id)
             self.toast.show(
-                "视频任务已排队：产出首帧 + mp4，渲染通常需数分钟；"
-                "首次运行会自动下载 Anima 权重（十几分钟量级）"
+                "图生视频已排队：Wan2.1-VACE 从首帧生成（16fps mp4），"
+                "首次生成需加载权重，通常 5-15 分钟"
                 if ref_path
-                else "文生视频已排队：后端先由 FLUX 出首帧 → Anima 渲染视频；"
-                "首次运行会自动下载 Anima 权重",
+                else "文生视频已排队：Wan2.1-T2V-1.3B 直接渲染（16fps mp4），"
+                "首次生成需加载权重，通常 5-15 分钟",
                 "success",
             )
         except Exception as exc:

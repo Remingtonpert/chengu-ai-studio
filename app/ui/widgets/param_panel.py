@@ -42,8 +42,14 @@ MODE_LABELS = {
 }
 ENGINE_TASK_TYPES = {
     "flux-schnell": ("image",),
-    "anima-image2video": ("video",),
+    "wan-t2v": ("video",),
+    "wan-i2v": ("video",),
     "ace-step-15": ("music",),
+}
+MODE_ENGINE_ALLOW = {
+    # 引擎与标签页一一对应：文生视频只用 wan-t2v，图生视频只用 wan-i2v（VACE）
+    "t2v": ("wan-t2v",),
+    "i2v": ("wan-i2v",),
 }
 ENGINE_STATE_LABELS = {"stopped": "未启动", "ready": "就绪", "failed": "失败"}
 
@@ -86,8 +92,9 @@ GENRE_CHIPS = [
 ENGINE_MODE_HINTS = {
     "image": "出图前先释放本机 LLM 引擎显存（scripts\\release_local_engine.bat），否则易 OOM。",
     "video": (
-        "Anima 权重未预下载：首次生成会联网下载（十几分钟量级）。"
-        "出视频前先释放本机 LLM 引擎显存（scripts\\release_local_engine.bat）。"
+        "Wan2.1 1.3B（Apache-2.0，本地离线）：文生视频 wan-t2v / 图生视频 wan-i2v（VACE），"
+        "导出 16fps mp4、480p 档，与图片/音乐共用 FIFO 串行队列。出视频前先释放本机 LLM 引擎显存"
+        "（scripts\\release_local_engine.bat），编码器阶段约需 10.5GB 空闲显存。"
     ),
     "music": (
         "ACE-Step 1.5（MIT 权重，本地离线）：48kHz wav，最低 12GB 显存，"
@@ -125,7 +132,7 @@ def default_settings() -> dict:
         "mode": "t2i",
         "refDir": "",
         "engine": "flux-schnell",
-        "vengine": "anima-image2video",
+        "vengine": "",
         "mengine": "ace-step-15",
         "bpm": 120,
         "musicDuration": 180,
@@ -301,8 +308,7 @@ class ParamPanel(QScrollArea):
         self.frames_range = self._slider(sec_frames, 5, 161, 4, 33)
         self.frames_range.valueChanged.connect(self._on_frames)
         sec_frames.add_hint(
-            "导出固定 24fps；帧数自动取到 4n+1（Anima 3D-VAE 时间压缩约束），"
-            "越长越吃显存与时间。"
+            "导出固定 16fps（Wan 原生）；帧数自动取到 4n+1（时间压缩约束），越长越吃显存与时间。"
         )
         layout.addWidget(sec_frames)
 
@@ -315,8 +321,7 @@ class ParamPanel(QScrollArea):
         motion.setEnabled(False)
         sec_motion._layout.addWidget(motion)
         sec_motion.add_hint(
-            "Anima 引擎当前不暴露运动幅度/帧率参数（未开放参数会被后端白名单拒绝），"
-            "此控件保留占位，待引擎支持后启用。"
+            "Wan2.1 不暴露运动幅度参数；此控件保留为禁用占位，不改变任何默认行为。"
         )
         layout.addWidget(sec_motion)
 
@@ -600,7 +605,7 @@ class ParamPanel(QScrollArea):
             else:
                 hint.setObjectName("hint")
                 hint.setText(
-                    f"视频像素 {pixels / 1e6:.2f}MP · Anima 走 bf16 + CPU offload，12GB 可行。"
+                    f"视频像素 {pixels / 1e6:.2f}MP · 按 12GB 显存档位设计（bf16 + CPU offload）。"
                 )
         elif pixels > PIXEL_SAFE:
             hint.setObjectName("hintWarn")
@@ -621,7 +626,7 @@ class ParamPanel(QScrollArea):
         self.steps_label.setText(f"{steps} 步")
         modality = MODALITY[self.mode]
         self.steps_hint.setText(
-            "Anima 推荐 28 步（默认）；12GB 上步数直接决定等待时长。"
+            "视频推荐 28 步（默认）；12GB 上步数直接决定等待时长。"
             if modality == "video"
             else "schnell 推荐 4 步；更多步数收益低且更慢。"
         )
@@ -648,7 +653,7 @@ class ParamPanel(QScrollArea):
         p = self._bucket()
         frames = snap_frames(p.get("frames") or 33)
         self.frames_range.setValue(frames)
-        self.frames_label.setText(f"{frames / 24:.2f} 秒 · {frames} 帧 @24fps")
+        self.frames_label.setText(f"{frames / 16:.2f} 秒 · {frames} 帧 @16fps")
 
     def sync_music(self) -> None:
         self._syncing = True
@@ -871,13 +876,16 @@ class ParamPanel(QScrollArea):
             for e in self._engines
             if modality in (ENGINE_TASK_TYPES.get(e.engine_id) or ())
         ]
+        allow = MODE_ENGINE_ALLOW.get(self.mode)
+        if allow:
+            options = [e for e in options if e.engine_id in allow]
         self._syncing = True
         try:
             self.engine_select.blockSignals(True)
             self.engine_select.clear()
             if not options:
                 self.engine_select.addItem(
-                    "未注册视频引擎"
+                    "视频引擎未注册 · 需 .venv-video 与 models\\wan2.1"
                     if modality == "video"
                     else "未注册音乐引擎（检查 .venv-music 与权重）"
                     if modality == "music"
@@ -887,6 +895,8 @@ class ParamPanel(QScrollArea):
                     "音乐引擎未注册：需 .venv-music 环境与 vendor\\ACE-Step-1.5"
                     "（运行 scripts\\setup_music_venv.ps1），未就绪前不会提交、不伪造输出"
                     if modality == "music"
+                    else "视频引擎未注册：需 .venv-video（scripts\\setup_video_venv.ps1）与 models\\wan2.1 权重（scripts\\download_video_weights.py），未就绪前不会提交、不伪造输出"
+                    if modality == "video"
                     else "引擎未注册"
                 )
                 self.engine_select.setEnabled(False)
@@ -945,6 +955,9 @@ class ParamPanel(QScrollArea):
             for e in self._engines
             if modality in (ENGINE_TASK_TYPES.get(e.engine_id) or ())
         ]
+        allow = MODE_ENGINE_ALLOW.get(self.mode)
+        if allow:
+            options = [e for e in options if e in allow]
         chosen = self.settings.get(key)
         return chosen if chosen in options else (options[0] if options else "")
 
@@ -956,6 +969,9 @@ class ParamPanel(QScrollArea):
             for e in self._engines
             if modality in (ENGINE_TASK_TYPES.get(e.engine_id) or ())
         ]
+        allow = MODE_ENGINE_ALLOW.get(self.mode)
+        if allow:
+            options = [e for e in options if e.engine_id in allow]
         if not options:
             return "无引擎", "bad"
         engine_id = self.engine_id()

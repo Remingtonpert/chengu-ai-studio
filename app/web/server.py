@@ -119,7 +119,7 @@ def _hardware_snapshot() -> dict[str, Any]:
     return {"gpu": gpu, "memory_total_gb": total_gb, "memory_free_gb": free_gb}
 
 _VALID_TASK_TYPES = ("image", "video", "music")
-# 垫图（init_image_path）允许的扩展名；worker 侧 flux/anima 解码同样按这些格式校验。
+# 垫图（init_image_path）允许的扩展名；worker 侧 flux 解码同样按这些格式校验。
 _VALID_INPUT_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp"})
 
 

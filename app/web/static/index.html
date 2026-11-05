@@ -128,12 +128,12 @@
     <section data-modes="t2v i2v">
       <h4>时长 <span id="frames-label" class="muted"></span></h4>
       <input type="range" id="frames-range" min="5" max="161" step="4">
-      <p class="hint">导出固定 24fps；帧数自动取到 4n+1（Anima 3D-VAE 时间压缩约束），越长越吃显存与时间。</p>
+      <p class="hint">导出固定 16fps（Wan 原生）；帧数自动取到 4n+1（时间压缩约束），越长越吃显存与时间。</p>
     </section>
     <section data-modes="t2v i2v">
       <h4>运动幅度</h4>
       <input type="range" min="0" max="100" value="50" disabled>
-      <p class="hint">Anima 引擎当前不暴露运动幅度/帧率参数（未开放参数会被后端白名单拒绝），此控件保留占位，待引擎支持后启用。</p>
+      <p class="hint">Wan2.1 不暴露运动幅度参数；此控件保留为禁用占位，不改变任何默认行为。</p>
     </section>
     <section data-modes="t2i i2i t2v i2v">
       <h4>Steps <span id="steps-label" class="muted"></span></h4>

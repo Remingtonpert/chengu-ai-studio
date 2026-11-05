@@ -26,7 +26,9 @@ const LS = {
 };
 
 /* 引擎 → 支持的任务类型（与 app/engine_registration.py 一致）。 */
-const ENGINE_TASK_TYPES = { "flux-schnell": ["image"], "anima-image2video": ["video"], "ace-step-15": ["music"] };
+const ENGINE_TASK_TYPES = { "flux-schnell": ["image"], "wan-t2v": ["video"], "wan-i2v": ["video"], "ace-step-15": ["music"] };
+/* 模式 → 引擎白名单：文生视频只用 wan-t2v，图生视频只用 wan-i2v（VACE），与后端注册一一对应。 */
+const MODE_ENGINE_ALLOW = { t2v: ["wan-t2v"], i2v: ["wan-i2v"] };
 /* 后端参数白名单（app/tasks/flux_worker.py _ALLOWED_PARAMS）。 */
 const ALLOWED_PARAMS = new Set([
   "width", "height", "steps", "seed", "negative_prompt",
@@ -37,6 +39,9 @@ const ENGINE_STATE_LABELS = { ready: "就绪", stopped: "未启动", starting: "
 const PIXEL_SAFE = 1_350_000;
 /* AI 音乐（ACE-Step 1.5）最低显存门槛（MB）：不足则前端直接拦截提交。 */
 const MUSIC_MIN_VRAM_MB = 12288;
+/* 视频（Wan2.1）显存门槛（MB）：UMT5-XXL 编码器 bf16 换入峰值约 10.6GB，空闲低于该值前端直接拦截提交。 */
+const VIDEO_MIN_VRAM_MB = 12288;
+const VIDEO_FREE_FLOOR_MB = 10500;
 
 /* 模式 Tab = 前端路由；后端接口按 task_type（image/video/music）分开，未改动。 */
 const MODES = ["t2i", "i2i", "t2v", "i2v", "music"];
@@ -45,16 +50,16 @@ const MODE_LABELS = { t2i: "文生图", i2i: "图生图", t2v: "文生视频", i
 const PLACEHOLDERS = {
   t2i: "发出想象…　Enter 生成 4 图网格 · Shift+Enter 换行",
   i2i: "先放垫图（选择/拖入/粘贴），再描述想要的变化…",
-  t2v: "描述动态画面（后端：FLUX 首帧 → Anima 图生视频）…",
+  t2v: "描述动态画面…（Wan2.1-T2V-1.3B · 16fps mp4）",
   i2v: "先放首帧图片，再描述画面如何运动…",
   music: "描述音乐：风格、情绪、乐器、节奏…（ACE-Step 1.5：支持 4-10 分钟带人声完整乐曲）",
 };
-/* 视频后端参数白名单（app/tasks/video_worker.py _ALLOWED_PARAMS）。 */
+/* 视频后端参数白名单（app/tasks/video_worker.py：width,height,num_frames,steps,seed,negative_prompt；图生视频再加 init_image_path）。 */
 const VIDEO_ALLOWED_PARAMS = new Set([
   "width", "height", "num_frames", "steps", "seed", "negative_prompt", "init_image_path",
 ]);
 const NEEDS_REF = new Set(["i2i", "i2v"]);
-const VIDEO_FPS = 24;           // anima.py export_to_video 固定 24fps
+const VIDEO_FPS = 16;            // Wan2.1 原生帧率（mp4 导出固定 16fps）
 const snapFrames = (v) => { const n = clampInt(v, 5, 161); return n - ((n - 1) % 4); };
 const isVideoUrl = (u) => /\.(mp4|webm|mov|mkv)$/i.test(u || "");
 const isAudioUrl = (u) => /\.(wav|mp3|flac|ogg|m4a|aac)$/i.test(u || "");
@@ -105,7 +110,7 @@ function defaultSettings() {
     mode: "t2i",
     refDir: "",
     engine: "flux-schnell",          // 图像模态引擎（t2i/i2i）
-    vengine: "anima-image2video",    // 视频模态引擎（t2v/i2v）
+    vengine: "",                   // 视频模态引擎（wan-t2v / wan-i2v，按标签页白名单自动落位）
     mengine: "ace-step-15",          // 音乐模态引擎（music，ACE-Step 1.5）
     bpm: 120, musicDuration: 180,    // 音乐参数（BPM 30-300；目标时长 10-480 秒）
     modes,
@@ -198,7 +203,7 @@ function syncVideoSize() {
     hint.textContent = `视频 ${s.width}×${s.height} × ${f} 帧在 12GB 上偏紧（CPU offload 也吃力），建议 ≤512×384。`;
   } else {
     hint.className = "hint";
-    hint.textContent = `视频像素 ${(px / 1e6).toFixed(2)}MP · Anima 走 bf16 + CPU offload，12GB 可行。`;
+    hint.textContent = `视频像素 ${(px / 1e6).toFixed(2)}MP · 按 12GB 显存档位设计（bf16 + CPU offload）。`;
   }
   updateComposerMeta();
 }
@@ -213,7 +218,7 @@ function syncFrames() {
   const f = snapFrames(state.p.frames ?? 33);
   state.p.frames = f;
   $("frames-range").value = f;
-  $("frames-label").textContent = `${(f / VIDEO_FPS).toFixed(2)} 秒 · ${f} 帧 @24fps`;
+  $("frames-label").textContent = `${(f / VIDEO_FPS).toFixed(2)} 秒 · ${f} 帧 @16fps`;
   updateComposerMeta();
 }
 
@@ -231,7 +236,7 @@ function syncSteps() {
   range.value = Math.min(Number(range.max), Math.max(1, state.p.steps));
   $("steps-label").textContent = `${state.p.steps} 步`;
   $("steps-hint").textContent = modality === "video"
-    ? "Anima 推荐 28 步（默认）；12GB 上步数直接决定等待时长。"
+    ? "视频推荐 28 步（默认）；12GB 上步数直接决定等待时长。"
     : "schnell 推荐 4 步；更多步数收益低且更慢。";
   updateComposerMeta();
 }
@@ -424,20 +429,23 @@ async function refreshEngines() {
   state.engines = payload.engines || [];
   const modality = MODALITY[state.mode];
   els.engineRestart.disabled = false;
+  const allow = MODE_ENGINE_ALLOW[state.mode];
   const options = state.engines.filter((e) => {
     const types = ENGINE_TASK_TYPES[e.engine_id];
-    return !types || types.includes(modality);
+    return (!types || types.includes(modality)) && (!allow || allow.includes(e.engine_id));
   });
   els.engineSelect.textContent = "";
   if (!options.length) {
     els.engineSelect.appendChild(el("option", null,
-      modality === "video" ? "未注册视频引擎"
+      modality === "video" ? "视频引擎未注册 · 需 .venv-video 与 models\\wan2.1"
         : modality === "music" ? "未注册音乐引擎（检查 .venv-music 与权重）"
           : "未注册图像引擎（检查 engines_enabled）"));
     els.enginePill.textContent = "无引擎"; els.enginePill.className = "pill bad";
     els.engineState.textContent = modality === "music"
       ? "音乐引擎未注册：需 .venv-music 环境与 vendor\\ACE-Step-1.5（运行 scripts\\setup_music_venv.ps1），未就绪前不会提交、不伪造输出"
-      : "引擎未注册";
+      : modality === "video"
+          ? "视频引擎未注册：需 .venv-video（运行 scripts\\setup_video_venv.ps1）与 models\\wan2.1 权重（运行 scripts\\download_video_weights.py，Apache-2.0），未就绪前不会提交、不伪造输出"
+        : "引擎未注册";
     state.engineId = "";
     return;
   }
@@ -456,7 +464,7 @@ async function refreshEngines() {
   els.enginePill.className = "pill " + (current && current.state === "ready" ? "ok" : current && current.state === "failed" ? "bad" : "");
   const hint = $("engine-mode-hint");
   if (hint) hint.textContent = modality === "video"
-    ? "Anima 权重未预下载：首次生成会联网下载（十几分钟量级）。出视频前先释放本机 LLM 引擎显存（scripts\\release_local_engine.bat）。"
+    ? "Wan2.1 1.3B（Apache-2.0，本地离线）：文生视频 wan-t2v / 图生视频 wan-i2v（VACE），导出 16fps mp4、480p 档，与图片/音乐共用 FIFO 串行队列。出视频前先释放本机 LLM 引擎显存（scripts\\release_local_engine.bat），编码器阶段约需 10.5GB 空闲显存。"
     : modality === "music"
       ? "ACE-Step 1.5（MIT 权重，本地离线）：48kHz wav，最低 12GB 显存，与图片/视频共用 FIFO 串行队列不并发抢占。出音乐前先释放本机 LLM 引擎显存（scripts\\release_local_engine.bat）。"
       : "出图前先释放本机 LLM 引擎显存（scripts\\release_local_engine.bat），否则易 OOM。";
@@ -589,7 +597,7 @@ function renderVideoTile(tile, rec, files) {
   const p = rec.parameters || {};
   const frames = Number(p.num_frames) || 0;
   tile.appendChild(el("div", "tile-foot",
-    `seed ${p.seed ?? "—"} · ${p.width ?? "?"}×${p.height ?? "?"} · ${frames ? `${(frames / VIDEO_FPS).toFixed(2)}s @24fps` : "时长?"}`));
+    `seed ${p.seed ?? "—"} · ${p.width ?? "?"}×${p.height ?? "?"} · ${frames ? `${(frames / VIDEO_FPS).toFixed(2)}s @16fps` : "时长?"}`));
   const vid = files.find((f) => isVideoUrl(f.url));
   if (vid) {
     const a = el("a", "vu dl", "⬇下载视频");
@@ -682,7 +690,7 @@ function tileNode(taskId, batch) {
     tile.appendChild(cancel);
   }
   const label = el("div", "skel-label");
-  if (rec.task_type === "video") label.appendChild(el("span", "muted", "视频管线：首帧 → 去噪 → 解码 → 编码，渲染需数分钟"));
+  if (rec.task_type === "video") label.appendChild(el("span", "muted", "视频管线：Wan2.1 时空去噪 → VAE 解码 → mp4 编码，渲染需数分钟到数十分钟"));
   if (rec.task_type === "music") label.appendChild(el("span", "muted", "音乐管线：加载权重（首次约 1-2 分钟）→ LM 谱曲填词 → DiT 去噪 → VAE 解码渲染 48kHz wav"));
   const bar = el("div", "bar");
   const fill = el("i");
@@ -737,6 +745,26 @@ async function imagine() {
     await imagineMusic(text);
     return; // imagineMusic 自行处理显存检查、边界确认、提交与提示
   }
+  if (modality === "video") {
+    if (!state.engines.some((e) => (ENGINE_TASK_TYPES[e.engine_id] || []).includes("video"))) {
+      showToast("视频引擎未注册：需 .venv-video（运行 scripts\\setup_video_venv.ps1）与 models\\wan2.1 权重（运行 scripts\\download_video_weights.py，Apache-2.0）；未就绪前不会提交任务，也不会伪造输出。", "error");
+      return;
+    }
+    let vhw = null;
+    try { vhw = await api("/api/hardware"); } catch { /* 探测失败不误判，交由后端 health_check 兜底 */ }
+    if (vhw && !vhw.gpu) {
+      showToast("显存不足，无法启动 Wan2.1 视频模型：检测不到 NVIDIA 显卡（最低要求 12GB 显存）。", "error");
+      return;
+    }
+    if (vhw && vhw.gpu && vhw.gpu.memory_total_mb < VIDEO_MIN_VRAM_MB) {
+      showToast(`显存不足，无法启动 Wan2.1 视频模型：显卡 ${vhw.gpu.name || "?"} 仅 ${vhw.gpu.memory_total_mb} MB，最低要求 ${VIDEO_MIN_VRAM_MB} MB（12GB）。`, "error");
+      return;
+    }
+    if (vhw && vhw.gpu && vhw.gpu.memory_free_mb < VIDEO_FREE_FLOOR_MB) {
+      showToast(`显存不足，无法启动 Wan2.1 视频模型：当前空闲显存仅 ${vhw.gpu.memory_free_mb} MB（Wan2.1 编码器阶段需约 10.5GB 空闲）。请先释放显存（双击 scripts\\release_local_engine.bat）再提交。`, "error");
+      return;
+    }
+  }
   if (!NEEDS_REF.has(state.mode) && state.ref) clearRef(); // 文生图/文生视频不挂垫图
   let extraParams = {};
   if (state.ref) {
@@ -769,8 +797,8 @@ async function imagine() {
         const rec = await submitTask(text, vparams, "video", state.settings.vengine);
         vbatch.taskIds.push(rec.task_id);
         showToast(refPath
-          ? "视频任务已排队：产出首帧 + mp4，渲染通常需数分钟；首次运行会自动下载 Anima 权重（十几分钟量级）"
-          : "文生视频已排队：后端先由 FLUX 出首帧 → Anima 渲染视频；首次运行会自动下载 Anima 权重", "success");
+          ? "图生视频已排队：Wan2.1-VACE 从首帧生成（16fps mp4），首次生成需加载权重，通常 5-15 分钟"
+          : "文生视频已排队：Wan2.1-T2V-1.3B 直接渲染（16fps mp4），首次生成需加载权重，通常 5-15 分钟", "success");
       } catch (error) { showToast(`视频提交失败：${error.message}`, "error"); }
       els.prompt.value = "";
       autosize();
