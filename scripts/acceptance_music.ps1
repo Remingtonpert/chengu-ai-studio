@@ -114,8 +114,42 @@ foreach ($f in $outputs) {
 }
 Add-Step 'real 48kHz wav verified (size/rate/duration)' $ok5 ($outputs -join '; ')
 
-$Summary.overall = $(if ($ok5) { 'OVERALL: PASS' } else { 'FAIL' })
+# Step 6: 12GB-tier duration clamp - request 600s, engine must clamp to 480s max.
+# Instrumental keeps this check fast; it verifies MUSIC_MAX_DURATION_SEC on the real engine.
+$t6 = Invoke-Api POST '/api/tasks' @{
+    task_type  = 'music'
+    engine_id  = 'ace-step-15'
+    prompt     = 'instrumental chinese folk interlude, guzheng solo, calm'
+    parameters = @{ duration = 600; instrumental = $true }
+}
+$ok6 = $false
+if ($null -ne $t6.task_id) {
+    $deadline6 = (Get-Date).AddMinutes($RunTimeoutMin)
+    $p6 = $t6
+    while ($p6.status -in @('queued', 'preparing', 'running') -and (Get-Date) -lt $deadline6) {
+        Start-Sleep -Seconds 20
+        $p6 = Invoke-Api GET "/api/tasks/$($t6.task_id)"
+        Log ("clamp poll: status={0}" -f $p6.status)
+    }
+    if ($p6.status -eq 'completed') {
+        $f6 = @($p6.output_files)[0]
+        if ($f6 -and (Test-Path -LiteralPath $f6)) {
+            $probe6 = & $VenvPy -c "import wave,sys; w=wave.open(sys.argv[1]); print(w.getframerate(), round(w.getnframes()/w.getframerate(),2))" $f6
+            $pr = "$probe6".Split(' ')
+            $dur6 = 0.0
+            if ($pr.Count -ge 2 -and [double]::TryParse($pr[1], [ref]$dur6)) {
+                Log "clamp wav: $f6 rate=$($pr[0])Hz duration=${dur6}s (requested 600s, must clamp to <=480s)"
+                $ok6 = ($pr[0] -eq '48000') -and ($dur6 -le 495) -and ($dur6 -ge 60)
+            }
+        }
+    }
+    Add-Step 'duration clamp: 600s request -> <=480s real wav' $ok6 "task=$($t6.task_id) status=$($p6.status) detail=$($p6.output_files)"
+} else {
+    Add-Step 'duration clamp: 600s request -> <=480s real wav' $false 'submit failed'
+}
+
+$Summary.overall = $(if ($ok5 -and $ok6) { 'OVERALL: PASS' } else { 'FAIL' })
 Save-Summary
 Log $Summary.overall
 Stop-Transcript | Out-Null
-exit $(if ($ok5) { 0 } else { 1 })
+exit $(if ($ok5 -and $ok6) { 0 } else { 1 })

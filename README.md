@@ -89,7 +89,8 @@ Third Project/
 │   ├── test_flux_image.py
 │   ├── test_flux_worker_adapter.py
 │   ├── test_phase1_foundation.py
-│   └── test_task_service.py
+│   ├── test_task_service.py
+│   └── test_cross_process_safety.py  # 执行者锁/原子领取/5秒轮询接管专项测试
 ├── docs/                        # 技术文档
 │   ├── ARCHITECTURE.md         # 架构提案与模块边界
 │   ├── DEVELOPMENT_PLAN.md     # 阶段验收计划
@@ -102,6 +103,7 @@ Third Project/
 │   ├── verify_env.py            # 环境自检（Python/venv/依赖）
 │   ├── build_launcher.ps1       # .exe 启动器构建
 │   ├── acceptance_flux.bat/.ps1 # FLUX 真机验收（端到端出图 + 离线校验）
+│   ├── acceptance_music.bat/.ps1 # ACE-Step 端到端验收（中文人声 48kHz wav + 时长截断实测）
 │   ├── release_local_engine.bat/.ps1  # 释放本机 LLM 引擎显存（生成前必跑）
 │   ├── setup_music_venv.ps1     # 音乐引擎环境一键搭建（.venv-music，幂等）
 │   ├── download_music_weights.py # ACE-Step 1.5 权重下载（断点续传）

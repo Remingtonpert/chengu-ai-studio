@@ -49,7 +49,7 @@
 | `submit_task(request) -> TaskRecord` | 校验（类型/引擎已注册/prompt 非空/JSON 可序列化）后落库 `queued` |
 | `await start()` | **跨进程执行者锁**（`<db>.worker.lock`，OS 崩溃自动释放）：抢到锁才运行 worker 循环与中断恢复；抢不到则本进程「只提交/查看」 |
 | `_claim_task(task_id)`（内部） | `UPDATE … WHERE status='queued'` 原子领取，两进程不可能重复执行同一任务 |
-| `cancel_task(task_id)` / `retry_task(task_id)` | 排队中直接取消；运行中取消当前进程的执行器；失败/取消可重试（`retry_of` 链） |
+| `cancel_task(task_id)` / `retry_task(task_id)` | 排队中直接取消（跨进程安全：状态条件更新）；运行中**仅能取消本进程（持锁执行者）正在执行的任务**——另一进程运行中的任务无法从旁观进程取消，这是当前版本诚实的边界；失败/取消可重试（`retry_of` 链） |
 | `get_task / list_tasks(limit≤1000)` | 只读查询 |
 | `await wait_until_idle()` / `await shutdown()` | 测试/退出辅助 |
 | worker 循环 | 5 秒超时轮询 → 另一进程（桌面或另一控制台）排入的任务最迟 5 秒被执行者领走 |
