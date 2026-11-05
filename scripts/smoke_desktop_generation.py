@@ -1,7 +1,8 @@
 """桌面端 MJ 同款创作界面冒烟测试（不启动 worker 循环，绝不触碰 GPU）。
 
 验证：五模式 Tab、想象 4 连发真实落库（queued）、i2i/i2v 垫图门槛、
-t2v 参数快照（33 帧 @24fps）、音乐显存门槛（不弹窗、不伪造）、
+视频（Wan2.1 wan-t2v/wan-i2v）提交断言动态化：引擎已注册且显存充足时断言真实
+落库（queued, engine=wan-t2v）；引擎未注册或显存预检不足时断言诚实拒绝（不落库、不伪造）；
 retry 对 queued 任务的诚实拒绝、会话 JSON 持久化、系统功能十页导航。
 使用临时 APP_HOME：任务与会话只写入临时目录，不会领取任何真实任务。
 """
@@ -29,6 +30,8 @@ from app.tasks.engine_manager import EngineManager  # noqa: E402
 from app.tasks.service import TaskService  # noqa: E402
 from app.ui.main_window import MainWindow  # noqa: E402
 from app.ui.session_store import SESSIONS_FILENAME  # noqa: E402
+from app.core.hardware import get_gpu_info  # noqa: E402
+from app.ui.widgets.param_panel import ENGINE_TASK_TYPES  # noqa: E402
 
 paths = AppPaths.from_environment()
 paths.prepare_app_home()
@@ -152,24 +155,49 @@ else:
     print("[gate:adv-ref] 高级参数目录型垫图被报错剔除，任务参数不含 init_image_path")
 page.panel.advanced_input.setPlainText("")
 
-# ------------------------------------------------------------ 文生视频参数
+# ------------------------- 视频：断言动态化（wan-t2v 注册+显存 → 落库；否则诚实拒绝）
 page.switch_mode("t2v")
 page.composer.clear_prompt()
-page.composer.set_prompt("冒烟测试视频")
+page.composer.set_prompt("冒烟测试视频提交")
+video_registered = any(
+    "video" in (ENGINE_TASK_TYPES.get(e.engine_id) or ()) for e in page._engines
+)
+_gpu = get_gpu_info()
+_video_vram_ok = bool(
+    _gpu
+    and _gpu.memory_total_mib >= 12288
+    and _gpu.memory_free_mib >= 10500
+)
 before = task_count()
 page.imagine()
-if task_count() != before + 1:
-    failures.append("t2v 未提交 1 个任务")
-video_record = task_service.list_tasks(limit=1)[0]
-params = video_record.request.parameters
-print(
-    f"[submit:t2v] engine={video_record.request.engine_id} "
-    f"frames={params.get('num_frames')} steps={params.get('steps')}"
-)
-if video_record.status.value != "queued":
-    failures.append("t2v 任务未排队")
-if params.get("num_frames") != 33 or "init_image_path" in params:
-    failures.append(f"t2v 参数快照异常：{params}")
+vid_submitted = task_count() - before
+if video_registered and _video_vram_ok:
+    if vid_submitted != 1:
+        failures.append(
+            f"wan-t2v 已注册且显存充足，t2v 应排队 1 个任务，实际 {vid_submitted}"
+        )
+    else:
+        vrec = task_service.list_tasks(limit=1)[0]
+        if (
+            vrec.request.engine_id != "wan-t2v"
+            or vrec.status.value != "queued"
+            or vrec.request.task_type != "video"
+        ):
+            failures.append(
+                f"视频任务引擎/状态异常：{vrec.request.engine_id} {vrec.status.value}"
+            )
+        else:
+            print("[pass:t2v] wan-t2v 已注册+显存充足：1 个 video 任务 queued（engine=wan-t2v）")
+else:
+    if vid_submitted != 0:
+        failures.append(
+            f"视频门槛被绕过（注册={video_registered}, 显存={_video_vram_ok}），却落了 {vid_submitted} 个任务"
+        )
+    else:
+        print(
+            "[gate:t2v] 视频门槛生效"
+            f"（注册={video_registered}, 显存充足={_video_vram_ok}）：提交被拒绝，未产生任务"
+        )
 
 # i2v：缺垫图必须诚实拒绝
 page.switch_mode("i2v")

@@ -1,6 +1,7 @@
 .venv/
 .venv-image/
 .venv-music/
+.venv-video/
 vendor/
 .tmp_pytest/
 data/

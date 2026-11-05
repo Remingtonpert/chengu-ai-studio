@@ -1,12 +1,13 @@
 # 辰鹄AI创作中心 · 一键便携打包脚本
 #
-# 产出 dist\ChenguAIStudio_Portable\ 完整目录包：应用代码 + 三个虚拟环境
-# （.venv / .venv-image / .venv-music）+ 包内自带 CPython 运行时 + 全部已就位
+# 产出 dist\ChenguAIStudio_Portable\ 完整目录包：应用代码 + 四个虚拟环境
+# （.venv / .venv-image / .venv-music / .venv-video）+ 包内自带 CPython 运行时 + 全部已就位
 # 的模型权重 + 启动 bat + 硬件分级检测 + 迁移说明文档。整个目录复制到装有
 # NVIDIA 显卡的 Windows 电脑后，双击「启动辰鹄.bat」即可离线运行（首次启动
 # 自动做路径自适应与硬件分级，全程不联网）。
 #
-# 用法（项目根目录执行；整包含权重约 60GB+，预留足够磁盘空间）：
+# 用法（项目根目录执行；整包含权重约 110GB（FLUX≈11.9GB + ACE-Step≈17GB +
+# Wan2.1≈44GB + 四个 venv/运行时），预留 ≥140GB 磁盘空间）：
 #   pwsh -File scripts\build_portable.ps1                  # 完整打包
 #   pwsh -File scripts\build_portable.ps1 -SkipModels      # 调试用：跳过权重复制
 #   pwsh -File scripts\build_portable.ps1 -SkipVenvs       # 调试用：跳过虚拟环境复制
@@ -44,16 +45,16 @@ $basePy = (& (Join-Path $root '.venv\Scripts\python.exe') -c "import sys;print(s
 Write-Host "== 包内运行时：$basePy =="
 RC $basePy (Join-Path $dist 'runtime\python311')
 
-# 3) 三个虚拟环境（.venv 桌面/Web 主环境；.venv-image 图像/视频；.venv-music 音乐）
+# 3) 四个虚拟环境（.venv 桌面/Web 主环境；.venv-image 图像 FLUX；.venv-video 视频 Wan2.1；.venv-music 音乐）
 if (-not $SkipVenvs) {
-    foreach ($v in '.venv', '.venv-image', '.venv-music') {
+    foreach ($v in '.venv', '.venv-image', '.venv-music', '.venv-video') {
         RC (Join-Path $root $v) (Join-Path $dist $v)
     }
 }
 
 # 4) 模型权重（已下载多少带多少；缺的模块启动后对应引擎自动不注册）
 if (-not $SkipModels) {
-    $modelDirs = @('models\flux-schnell', 'models\ace-step-1.5', 'models\anima-image2video')
+    $modelDirs = @('models\flux-schnell', 'models\ace-step-1.5', 'models\wan2.1')
     foreach ($m in $modelDirs) {
         $p = Join-Path $root $m
         if (Test-Path $p) { RC $p (Join-Path $dist $m) } else { Write-Warning "权重缺失（该模块引擎将不注册）：$m" }
