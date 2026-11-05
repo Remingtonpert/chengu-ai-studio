@@ -214,7 +214,7 @@ try {
 
     # --------------------------------------- Step 2b: Chinese prompt end-to-end (zh encode fix)
     Log 'submitting Chinese-prompt task (1216x704 steps=4 - same shape as the failed batch)'
-    $tZ = Submit-Image '古风，青城山，山间云雾缭绕，一座古朴小亭，清晨柔和天光，写实风景，8k，高清，干净画面' @{ width = 1216; height = 704; steps = 4; seed = 20261105 }
+    $tZ = Submit-Image '一只橘猫趴在窗台上晒太阳，午后暖色阳光，写实摄影风格，毛发细节清晰，浅景深，8k，高清' @{ width = 1216; height = 704; steps = 4; seed = 20261105 }
     $tZ = Poll-Task $tZ 900
     $genZ = if ($tZ.finished_at) { [math]::Round(([DateTimeOffset]::Parse($tZ.finished_at) - [DateTimeOffset]::Parse($tZ.created_at)).TotalSeconds, 1) } else { $null }
     Add-Step 'Chinese-prompt generation completes' ($tZ.status -eq 'completed') "status=$($tZ.status) total_sec=$genZ err=$($tZ.error_message)"

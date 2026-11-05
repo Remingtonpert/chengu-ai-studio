@@ -97,6 +97,61 @@ if task_count() != before:
     failures.append("i2i 无垫图竟然提交了任务")
 print("[gate:i2i] 无垫图被拒绝，未产生任务")
 
+# ---------------- 垫图必须是「已存在的具体图片文件」：目录/不存在/无效格式拦截 ----------------
+import base64  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+refs_tmp = paths.app_home / "smoke_refs"
+refs_tmp.mkdir(exist_ok=True)
+good_png = refs_tmp / "ref_ok.png"
+good_png.write_bytes(
+    base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+)
+page.composer.set_prompt("需要垫图的冒烟")
+
+page.composer.set_ref(str(paths.app_home))  # 目录 → 必须拦截
+before = task_count()
+page.imagine()
+if task_count() != before:
+    failures.append("i2i 垫图为目录时竟然提交了任务")
+print("[gate:ref-dir] 垫图填目录被拦截（提示需选具体图片文件）")
+
+page.composer.set_ref("D:\\chenguai_smoke_absent_9f3a\\nope.png")  # 盘符合法但不存在 → 拦截
+before = task_count()
+page.imagine()
+if task_count() != before:
+    failures.append("i2i 垫图不存在的路径竟然提交了任务")
+print("[gate:ref-missing] 垫图路径不存在被拦截")
+
+page.composer.set_ref(str(good_png))  # 真实存在的图片文件 → 放行
+before = task_count()
+page.imagine()
+ref_submitted = task_count() - before
+ref_latest = task_service.list_tasks(limit=ref_submitted)
+if ref_submitted != 4 or not all(
+    r.request.parameters.get("init_image_path") == str(good_png) for r in ref_latest
+):
+    failures.append(f"i2i 有效垫图文件未正确排队 4 张或未写入 init_image_path：{ref_submitted}")
+else:
+    print("[pass:ref-file] 有效垫图文件放行：4 张 queued 且参数含 init_image_path")
+page.composer.clear_ref()
+
+# 高级参数里把 init_image_path 填成目录 → 报错该键、其余参数照常提交
+page.switch_mode("t2i")
+page.composer.clear_prompt()
+page.composer.set_prompt("高级参数垫图目录测试")
+page.panel.advanced_input.setPlainText(f'{{"init_image_path": "{str(paths.app_home)}"}}')
+before = task_count()
+page.imagine()
+adv_latest = task_service.list_tasks(limit=task_count() - before)
+if not adv_latest or any("init_image_path" in r.request.parameters for r in adv_latest):
+    failures.append("高级参数目录型 init_image_path 未被拦截（任务参数仍包含该键）")
+else:
+    print("[gate:adv-ref] 高级参数目录型垫图被报错剔除，任务参数不含 init_image_path")
+page.panel.advanced_input.setPlainText("")
+
 # ------------------------------------------------------------ 文生视频参数
 page.switch_mode("t2v")
 page.composer.clear_prompt()
