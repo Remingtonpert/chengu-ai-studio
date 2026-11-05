@@ -19,13 +19,16 @@ from app.tasks.service import TaskService
 from app.ui.main_window import MainWindow
 
 
-def start_task_service_loop(task_service: TaskService, logger) -> Callable[[], None]:
+def start_task_service_loop(
+    task_service: TaskService, logger
+) -> tuple[Callable[[], None], asyncio.AbstractEventLoop | None]:
     """在后台线程运行 asyncio 事件循环，驱动与 Web 控制台完全相同的 TaskService。
 
     桌面端不再自带独立的任务执行逻辑：worker 循环、SQLite FIFO 队列、引擎
     子进程协议与 Web 模式一行不差；若另一个进程（Web 控制台）已经是任务
     执行者，TaskService 会自动降级为「只提交」模式，队列 5 秒内被执行者领走。
-    返回一个用于应用退出时优雅停止（shutdown + 停循环）的回调。
+    返回 (优雅停止回调, 服务事件循环)：GUI 用该 loop 回投 cancel_task /
+    restart_engine 等协程（asyncio.run_coroutine_threadsafe）。
     """
     loop_holder: dict[str, asyncio.AbstractEventLoop | None] = {"loop": None}
     loop_ready = threading.Event()
@@ -66,7 +69,7 @@ def start_task_service_loop(task_service: TaskService, logger) -> Callable[[], N
         except Exception:
             logger.exception("停止任务服务失败")
 
-    return stop
+    return stop, loop_holder["loop"]
 
 
 def create_application(
@@ -84,7 +87,7 @@ def create_application(
     # 中断任务恢复与 worker 循环统一由 task_service.start() 完成，
     # 并由跨进程执行者锁保证只有「首个启动的进程」执行恢复，
     # 不会把另一个进程正在运行的任务误标为失败。
-    stop_task_loop = start_task_service_loop(task_service, logger)
+    stop_task_loop, service_loop = start_task_service_loop(task_service, logger)
 
     application = QApplication.instance() or QApplication(list(argv or sys.argv))
     window = MainWindow(
@@ -93,6 +96,7 @@ def create_application(
         str(paths.database_file),
         task_service,
         engine_manager,
+        service_loop,
     )
     application.aboutToQuit.connect(
         lambda: logger.info("应用正常退出")
