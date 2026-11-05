@@ -16,6 +16,7 @@ import torch
 from diffusers import FluxImg2ImgPipeline, FluxPipeline
 
 from app.engine.abstract import ImageGenerationEngine
+from app.engine.prompt_utils import coerce_prompt_text
 
 # FLUX.1 支持的模型列表
 FLUX_SUPPORTED_MODELS = {
@@ -45,6 +46,24 @@ def _round_to_multiple(value: int, multiple: int = _MULTIPLE) -> int:
     """把尺寸就近取整到 multiple 的倍数，并限制在 [multiple, 4096]。"""
     value = max(multiple, min(int(value), 4096))
     return round(value / multiple) * multiple
+
+
+def _hub_repo_cache_dir(cache_dir: Path, repo_id: str) -> Path:
+    """huggingface_hub 标准缓存布局中该仓库的目录（models--org--name）。"""
+    return cache_dir / f"models--{repo_id.replace('/', '--')}"
+
+
+def _pick_local_snapshot(cache_dir: Path, repo_id: str) -> Optional[Path]:
+    """返回最完整的本地快照目录；缺 model_index.json 的快照视为不完整。"""
+    snapshots = _hub_repo_cache_dir(cache_dir, repo_id) / "snapshots"
+    if not snapshots.is_dir():
+        return None
+    candidates = [
+        d for d in snapshots.iterdir() if d.is_dir() and (d / "model_index.json").is_file()
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda d: d.stat().st_mtime_ns)
 
 
 class FluxEngineError(RuntimeError):
@@ -103,6 +122,14 @@ class FluxImageEngine(ImageGenerationEngine):
                 return
 
             repo = self.model_config["hf_repo"]
+            # 离线优先：权重快照缺失时直接报错并列出期望位置，绝不盲目联网重下。
+            if _pick_local_snapshot(self.cache_dir, repo) is None:
+                expected = _hub_repo_cache_dir(self.cache_dir, repo) / "snapshots"
+                raise FluxEngineError(
+                    f"未找到模型 {repo} 的完整本地权重快照（期望目录：{expected}）。"
+                    "引擎默认离线加载、不会自动联网下载；请先用离线下载脚本获取权重并放入上述目录，"
+                    "或在确认许可与网络后显式设置 HF_HUB_OFFLINE=0 再重试。"
+                )
             try:
                 loop = asyncio.get_running_loop()
                 self.pipe = await loop.run_in_executor(
@@ -158,8 +185,28 @@ class FluxImageEngine(ImageGenerationEngine):
         Raises:
             FluxEngineError: 模型加载失败 / 无 GPU / 输入图片无效 / pipeline 结果为空
         """
+        # —— 入口规整：把任意来源的提示词统一成 tokenizers 合法类型（纯 str）。
+        # 这一步保证纯中文、纯英文、中英混合，乃至上游误传的嵌套 list/bytes，
+        # 都不会再触发 "TextEncodeInput must be Union[TextInputSequence, ...]"。
+        prompt = coerce_prompt_text(prompt) or ""
+        if not prompt:
+            raise FluxEngineError("提示词为空：请输入中文或英文描述后重试")
+        negative_prompt = coerce_prompt_text(negative_prompt)
+
+        # —— 生成开始前提前锁定并创建输出目录（Windows 路径统一处理：
+        # expanduser + 绝对化 + resolve，避免反斜杠/相对路径转义异常）。
+        raw_out = output_dir if output_dir else str(self.output_dir)
+        target_dir = Path(raw_out).expanduser()
+        if not target_dir.is_absolute():
+            target_dir = Path.cwd() / target_dir
+        target_dir = target_dir.resolve()
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise FluxEngineError(f"无法创建输出目录：{target_dir}（{exc}）") from exc
+
         if init_image_path:
-            init = Path(init_image_path)
+            init = Path(str(init_image_path)).expanduser()
             if not init.is_file():
                 raise FluxEngineError(f"图生图输入文件不存在：{init}")
             # 先验证输入图片有效，再付出加载权重的代价
@@ -214,8 +261,7 @@ class FluxImageEngine(ImageGenerationEngine):
             raise FluxEngineError("pipeline 返回结果为空")
 
         img_pil: PIL.Image.Image = result.images[0]
-        target_dir = Path(output_dir) if output_dir else self.output_dir
-        target_dir.mkdir(parents=True, exist_ok=True)
+        # target_dir 已在生成开始前完成解析与创建（见函数开头）。
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         mode = "img2img" if init_image_path else "txt2img"
         output_path = target_dir / f"flux_{mode}_{stamp}.png"

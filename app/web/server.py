@@ -1,4 +1,4 @@
-"""Strata 本地 Web 服务：纯标准库 asyncio HTTP 服务器。
+"""辰鹄AI创作中心 本地 Web 服务：纯标准库 asyncio HTTP 服务器。
 
 与 Qt 桌面端共用同一套服务对象（ConfigStore / EngineManager / TaskService），
 只监听本机地址（默认 127.0.0.1:8765），不引入任何第三方依赖。
@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import re
+import subprocess
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,6 +58,65 @@ _STATUS_PATH = re.compile(r"^/api/tasks/([^/]+)$")
 _ACTION_PATH = re.compile(r"^/api/tasks/([^/]+)/(cancel|retry)$")
 _ENGINE_RESTART_PATH = re.compile(r"^/api/engines/([^/]+)/restart$")
 _OUTPUT_PATH = re.compile(r"^/outputs/(.+)$")
+
+
+def _hardware_snapshot() -> dict[str, Any]:
+    """只读硬件快照：NVIDIA 显卡显存（nvidia-smi）与物理内存（GlobalMemoryStatusEx）。
+
+    为 AI 音乐提交前置检查（显存门槛拦截）与启动自检展示服务的纯信息端点，
+    不参与任何生成/排队逻辑。nvidia-smi 不可用（无 NVIDIA 显卡）时如实返回
+    gpu=None，前端据此诚实提示，绝不伪造数值。
+    """
+    gpu: dict[str, Any] | None = None
+    try:
+        proc = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.total,memory.free",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=True,
+        )
+        line = (proc.stdout.strip().splitlines() or [""])[0]
+        name, total_mb, free_mb = [part.strip() for part in line.split(",")[:3]]
+        gpu = {
+            "name": name,
+            "memory_total_mb": int(total_mb),
+            "memory_free_mb": int(free_mb),
+        }
+    except Exception:  # noqa: BLE001 - 探测失败时如实降级
+        gpu = None
+
+    total_gb: float | None = None
+    free_gb: float | None = None
+    try:
+        import ctypes
+
+        class _MemoryStatusEx(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        stat = _MemoryStatusEx()
+        stat.dwLength = ctypes.sizeof(_MemoryStatusEx)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+            total_gb = round(stat.ullTotalPhys / (1024**3), 1)
+            free_gb = round(stat.ullAvailPhys / (1024**3), 1)
+    except Exception:  # noqa: BLE001 - 非 Windows 或 API 失败时省略该字段
+        pass
+
+    return {"gpu": gpu, "memory_total_gb": total_gb, "memory_free_gb": free_gb}
 
 _VALID_TASK_TYPES = ("image", "video", "music")
 
@@ -145,7 +205,15 @@ class WebApplication:
 
     def __init__(self, services: WebServices) -> None:
         self.services = services
-        self.output_dir = services.paths.output_dir
+        # 与 worker 端 CHENGUAI_OUTPUT_DIR 同源：优先 config["output_dir"]，
+        # 否则回退 AppPaths 默认。两侧不一致就会出现“产物不在输出目录”。
+        configured = str(services.config.get("output_dir", "")).strip()
+        self.output_dir = Path(configured).expanduser() if configured else services.paths.output_dir
+        # 启动即确保输出目录存在（生成开始前的前置检查）。
+        try:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:  # 输出目录不可写时不阻塞启动，仅记录
+            services.logger.exception("无法创建输出目录：%s", self.output_dir)
         self.logger = services.logger
 
     # ------------------------------------------------------------------ 路由
@@ -189,6 +257,8 @@ class WebApplication:
                     ]
                 },
             )
+        if path == "/api/hardware":
+            return self._json(200, _hardware_snapshot())
         if path == "/api/tasks":
             status_value = (query.get("status") or [""])[0]
             limit_value = (query.get("limit") or ["100"])[0]
@@ -518,13 +588,13 @@ async def run_web_server(
     await services.task_service.start()
     protocol = _HttpServerProtocol(app_obj, services.logger)
     server = await asyncio.start_server(protocol.serve, host, port)
-    services.logger.info("Strata Web 服务已启动：http://%s:%d", host, port)
+    services.logger.info("辰鹄AI创作中心 Web 服务已启动：http://%s:%d", host, port)
     try:
         async with server:
             await server.serve_forever()
     finally:
         await services.task_service.shutdown()
-        services.logger.info("Strata Web 服务已停止")
+        services.logger.info("辰鹄AI创作中心 Web 服务已停止")
 
 
 def main() -> int:

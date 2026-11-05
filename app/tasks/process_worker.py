@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import importlib
+import inspect
 import json
 import sys
 from collections.abc import Callable
@@ -62,7 +63,9 @@ async def _serve(factory_reference: str) -> None:
             if method == "health_check":
                 result = await adapter.health_check()
             elif method == "validate_request":
-                await adapter.validate_request(_request_from_json(payload))
+                outcome = adapter.validate_request(_request_from_json(payload))
+                if inspect.isawaitable(outcome):
+                    await outcome
                 result = None
             elif method == "generate":
                 generation_result = await adapter.generate(_request_from_json(payload))
@@ -87,6 +90,10 @@ async def _serve(factory_reference: str) -> None:
 
 
 def main() -> int:
+    # JSON-lines 协议必须全程 UTF-8：stdout 为管道时 Windows 默认用系统代码页
+    # （GBK/cp936），adapter 端按 UTF-8 解码会失败并报"无效 IPC 数据"。
+    sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser()
     parser.add_argument("--adapter-factory", required=True)
     args = parser.parse_args()

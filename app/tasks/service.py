@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import msvcrt
+import os
 import sqlite3
 import time
 import uuid
@@ -59,6 +61,47 @@ class TaskService:
         self._active_tasks: dict[str, asyncio.Task[None]] = {}
         self._wake_event: asyncio.Event | None = None
         self._stopping = False
+        # 跨进程「唯一任务执行者」锁：桌面端与 Web 控制台共用同一个 SQLite
+        # 队列时，只有先持有锁的进程运行 worker 循环，另一个进程只提交任务，
+        # 队列会在 5 秒内被执行者领走（见 _worker_loop 的超时轮询）。
+        self._executor_lock_handle = None
+        self._executor_active = False
+
+    def _executor_lock_path(self) -> Path:
+        return Path(str(self.database_path) + ".worker.lock")
+
+    def _acquire_executor_lock(self) -> bool:
+        """非阻塞尝试持有执行者锁；进程退出（含崩溃）时操作系统自动释放。"""
+        if self._executor_lock_handle is not None:
+            return True
+        try:
+            handle = open(self._executor_lock_path(), "a+b")
+        except OSError:
+            _LOGGER.exception("无法创建任务执行者锁文件")
+            return False
+        try:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            handle.close()
+            return False
+        handle.seek(0)
+        handle.write(str(os.getpid()).encode("ascii"))
+        handle.flush()
+        self._executor_lock_handle = handle
+        return True
+
+    def _release_executor_lock(self) -> None:
+        handle = self._executor_lock_handle
+        if handle is None:
+            return
+        self._executor_lock_handle = None
+        try:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        handle.close()
 
     def submit_task(self, request: TaskRequest) -> TaskRecord:
         self._validate_request(request)
@@ -172,6 +215,14 @@ class TaskService:
         if self._worker_task is not None and not self._worker_task.done():
             return
         self._stopping = False
+        if not self._acquire_executor_lock():
+            self._executor_active = False
+            _LOGGER.warning(
+                "另一个进程（Web 控制台或另一实例）正在执行任务队列；"
+                "本进程只提交与查看任务，队列会在 5 秒内被执行者领走。"
+            )
+            return
+        self._executor_active = True
         self.recover_interrupted_tasks()
         self._wake_event = asyncio.Event()
         self._worker_task = asyncio.create_task(
@@ -206,7 +257,12 @@ class TaskService:
                 self._wake_event.clear()
                 if self._oldest_queued_task_id() is not None:
                     continue
-                await self._wake_event.wait()
+                try:
+                    await asyncio.wait_for(self._wake_event.wait(), timeout=5.0)
+                except TimeoutError:
+                    # 超时唤醒：定期重新扫描队列，使另一个进程提交的
+                    # 任务（桌面端或另一控制台）最迟 5 秒内被本执行者领走。
+                    pass
                 continue
 
             runner = asyncio.create_task(
@@ -235,13 +291,28 @@ class TaskService:
             finally:
                 self._active_tasks.pop(task_id, None)
 
+    def _claim_task(self, task_id: str) -> bool:
+        """跨进程原子领取排队任务：UPDATE ... WHERE status='queued' 只成功一次。
+
+        桌面端与 Web 控制台同时运行时，同一个任务不可能被两个进程重复执行；
+        领取失败（另一进程已领走或任务刚被取消）就诚实跳过。
+        """
+        with sqlite3.connect(self.database_path, timeout=10) as connection:
+            cursor = connection.execute(
+                "UPDATE tasks SET status = ? WHERE task_id = ? AND status = ?",
+                (TaskStatus.PREPARING.value, task_id, TaskStatus.QUEUED.value),
+            )
+            return cursor.rowcount == 1
+
     async def _process_task(self, task_id: str) -> None:
+        if not self._claim_task(task_id):
+            # 已被另一进程领取（或刚被取消）：跳过，不重复执行。
+            return
         task = self.get_task(task_id)
-        if task is None or task.status is not TaskStatus.QUEUED:
+        if task is None:
             return
         adapter = None
         try:
-            self._transition(task_id, TaskStatus.PREPARING)
             adapter = await self.engine_manager.start_engine(task.request.engine_id)
             if task.request.task_type not in adapter.task_types:
                 raise ValueError(
@@ -420,3 +491,4 @@ class TaskService:
                 except asyncio.CancelledError:
                     pass
         await self.engine_manager.shutdown()
+        self._release_executor_lock()

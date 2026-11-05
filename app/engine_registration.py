@@ -1,8 +1,9 @@
 """共享的生成引擎注册逻辑（不依赖 Qt，桌面端与 Web 端共用）。
 
 真实引擎（FLUX 图像、Anima 视频）都运行在 .venv-image 的独立 worker 子进程里，
+音乐引擎（ACE-Step 1.5）运行在 .venv-music 的独立 worker 子进程里；
 主进程（桌面或 Web 服务器）只通过 ProcessEngineAdapter 的 JSON-lines IPC 通信，
-因此主进程虚拟环境（.venv）不需要 torch/diffusers。
+因此主进程虚拟环境（.venv）不需要 torch/diffusers/acestep。
 """
 
 from __future__ import annotations
@@ -21,12 +22,41 @@ GENERATION_REQUEST_TIMEOUT_SECONDS = 1800.0
 
 IMAGE_ENGINE_ID = "flux-schnell"
 VIDEO_ENGINE_ID = "anima-image2video"
+MUSIC_ENGINE_ID = "ace-step-15"
 
 
 def default_image_venv_python() -> Path:
     """默认的图片/视频引擎虚拟环境解释器（项目根目录下的 .venv-image）。"""
     project_root = Path(__file__).resolve().parents[1]
     return project_root / ".venv-image" / "Scripts" / "python.exe"
+
+
+def default_music_venv_python() -> Path:
+    """默认的音乐引擎虚拟环境解释器（项目根目录下的 .venv-music）。"""
+    project_root = Path(__file__).resolve().parents[1]
+    return project_root / ".venv-music" / "Scripts" / "python.exe"
+
+
+def default_music_repo_dir() -> Path:
+    """默认的 ACE-Step-1.5 代码仓库目录（项目内 vendor/ACE-Step-1.5）。"""
+    return Path(__file__).resolve().parents[1] / "vendor" / "ACE-Step-1.5"
+
+
+def default_music_model_dir() -> Path:
+    """默认的 ACE-Step 1.5 权重目录（项目内 models/ace-step-1.5）。"""
+    return Path(__file__).resolve().parents[1] / "models" / "ace-step-1.5"
+
+
+def _disabled_modalities() -> frozenset[str]:
+    """启动前置硬件检测通过环境变量声明的「被禁用模态」（便携包按显存/内存分级）。
+
+    CHENGUAI_DISABLE_MODALITIES 形如 "video,music"：被禁模态的引擎直接不注册，
+    前端与接口层自然呈现「未注册引擎」状态，不会提交任务——分级只影响注册
+    这一步，不改动任何图片/视频/音乐模块的生成逻辑。开发环境不注入该变量，
+    行为与之前完全一致。
+    """
+    raw = os.environ.get("CHENGUAI_DISABLE_MODALITIES", "").strip().lower()
+    return frozenset(p.strip() for p in raw.split(",") if p.strip())
 
 
 def _make_worker_factory(
@@ -36,6 +66,7 @@ def _make_worker_factory(
     engine_id: str,
     factory_spec: str,
     task_types: frozenset[str],
+    extra_env: dict[str, str] | None = None,
 ) -> callable:
     def factory() -> ProcessEngineAdapter:
         # ProcessEngineAdapter 本身不注入环境变量；这里把配置映射为 worker
@@ -44,6 +75,18 @@ def _make_worker_factory(
         os.environ["CHENGUAI_OUTPUT_DIR"] = str(config.get("output_dir", ""))
         os.environ["CHENGUAI_FLUX_ENGINE_ID"] = IMAGE_ENGINE_ID
         os.environ["CHENGUAI_VIDEO_ENGINE_ID"] = VIDEO_ENGINE_ID
+        os.environ["CHENGUAI_MUSIC_ENGINE_ID"] = MUSIC_ENGINE_ID
+        if extra_env:
+            os.environ.update(extra_env)
+        # 强制 worker 离线加载本地权重：FLUX.1-schnell 是 gated 仓库，
+        # huggingface_hub 在 from_pretrained 前会先联网查 revision，无网络/
+        # 无 token 时表现为 [WinError 10060] 超时或 401，即使本地缓存完整。
+        # 这些变量必须在主进程（启动 worker 子进程之前）设置——huggingface_hub
+        # 在 import 时读取一次。需要在线下载权重时，由启动端显式设
+        # HF_HUB_OFFLINE=0 覆盖（setdefault 保留启动端的显式值）。
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+        os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
         return ProcessEngineAdapter(
             engine_id=engine_id,
             command=[
@@ -76,6 +119,13 @@ def register_production_engines(
         logger.info("真实生成引擎未启用（配置 engines_enabled=false），生成任务将保持排队校验后失败")
         return
 
+    disabled = _disabled_modalities()
+    if "image" in disabled:
+        logger.info(
+            "启动硬件检测评级为低配（CHENGUAI_DISABLE_MODALITIES 含 image）：全部生成引擎不注册，仅保留浏览与历史记录"
+        )
+        return
+
     venv_value = str(config.get("image_venv_python") or "").strip()
     python_exe = Path(venv_value) if venv_value else default_image_venv_python()
     if not python_exe.is_file():
@@ -99,18 +149,69 @@ def register_production_engines(
             frozenset({"image"}),
         ),
     )
-    engine_manager.register_factory(
-        VIDEO_ENGINE_ID,
-        _make_worker_factory(
-            python_exe,
-            project_root,
-            config,
+    if "video" not in disabled:
+        engine_manager.register_factory(
             VIDEO_ENGINE_ID,
-            "app.tasks.video_worker:create_adapter",
-            frozenset({"video"}),
-        ),
-    )
-    logger.info(
-        "已注册 FLUX 图像引擎与 Anima 视频引擎（worker：%s）",
-        python_exe,
-    )
+            _make_worker_factory(
+                python_exe,
+                project_root,
+                config,
+                VIDEO_ENGINE_ID,
+                "app.tasks.video_worker:create_adapter",
+                frozenset({"video"}),
+            ),
+        )
+        logger.info(
+            "已注册 FLUX 图像引擎与 Anima 视频引擎（worker：%s）",
+            python_exe,
+        )
+    else:
+        logger.info(
+            "已注册 FLUX 图像引擎（worker：%s）；视频模块已被启动硬件检测自动禁用（显存/内存不足）",
+            python_exe,
+        )
+
+    # ---- AI 音乐引擎（ACE-Step 1.5，官方 MIT 权重，本地离线推理）----
+    # 使用独立的 .venv-music：ACE-Step 1.5 要求 transformers<4.58，与图片/视频
+    # 引擎环境（transformers 5.x）存在硬冲突，必须环境隔离；图片/视频模块代码
+    # 不受任何影响。路径全部为可配置项（默认相对项目根目录），便于打包迁移；
+    # 环境或代码仓库缺失时不注册，前端音乐入口会诚实提示，不会伪造输出。
+    music_python_value = str(config.get("music_venv_python") or "").strip()
+    music_python = Path(music_python_value) if music_python_value else default_music_venv_python()
+    music_repo = Path(str(config.get("music_repo_dir") or default_music_repo_dir()))
+    music_models = Path(str(config.get("music_model_dir") or default_music_model_dir()))
+    if "music" in disabled:
+        logger.info("音乐模块已被启动硬件检测自动禁用（显存/内存不足）")
+    elif music_python.is_file() and (music_repo / "acestep").is_dir():
+        engine_manager.register_factory(
+            MUSIC_ENGINE_ID,
+            _make_worker_factory(
+                music_python,
+                project_root,
+                config,
+                MUSIC_ENGINE_ID,
+                "app.tasks.music_worker:create_adapter",
+                frozenset({"music"}),
+                extra_env={
+                    "CHENGUAI_MUSIC_CHECKPOINTS_DIR": str(music_models),
+                    "CHENGUAI_MUSIC_REPO_DIR": str(music_repo),
+                    "CHENGUAI_MUSIC_LM_MODEL": str(
+                        config.get("music_lm_model") or "acestep-5Hz-lm-1.7B"
+                    ),
+                    "CHENGUAI_MUSIC_MAX_TASKS_PER_WORKER": str(
+                        int(config.get("music_max_tasks_per_worker") or 4)
+                    ),
+                },
+            ),
+        )
+        logger.info(
+            "ACE-Step 1.5 音乐引擎已注册（worker：%s，权重：%s）",
+            music_python,
+            music_models,
+        )
+    else:
+        logger.info(
+            "ACE-Step 1.5 音乐引擎未注册（缺少 %s 或 %s）；音乐任务将在校验阶段诚实报错",
+            music_python,
+            music_repo,
+        )

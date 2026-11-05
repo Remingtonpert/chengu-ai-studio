@@ -1,4 +1,4 @@
-// Strata 本地部署启动器：定位项目虚拟环境并把命令转发给对应入口模块。
+// 辰鹄AI创作中心 本地部署启动器：定位项目虚拟环境并把命令转发给对应入口模块。
 // 用 Windows 自带的 .NET Framework csc.exe 编译，见 scripts/build_launcher.ps1。
 using System;
 using System.Diagnostics;
@@ -56,7 +56,7 @@ namespace StrataLauncher
 
         private static int CheckEnvironment(string baseDir, string venvPython)
         {
-            Console.WriteLine("== Strata 本地环境自检 ==");
+            Console.WriteLine("== 辰鹄AI创作中心 本地环境自检 ==");
             Console.WriteLine("项目目录 : " + baseDir);
             int failures = 0;
 
@@ -142,7 +142,7 @@ namespace StrataLauncher
                     break;
                 default:
                     Console.Error.WriteLine("用法: Strata.exe [app|web|check] [附加参数...]");
-                    Console.Error.WriteLine("  (无参数)  启动 Strata 桌面应用");
+                    Console.Error.WriteLine("  (无参数)  启动 辰鹄AI创作中心 桌面应用");
                     Console.Error.WriteLine("  web       启动本地网页控制台（默认 http://127.0.0.1:8765）");
                     Console.Error.WriteLine("  check     运行本地环境自检");
                     Console.Error.WriteLine("附加参数会原样传给对应的 Python 入口。");

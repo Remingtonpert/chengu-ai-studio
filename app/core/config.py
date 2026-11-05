@@ -23,6 +23,13 @@ class ConfigStore:
             # 真实生成引擎（FLUX）需用户确认模型下载/许可后才启用；默认关闭。
             "engines_enabled": False,
             "image_venv_python": "",
+            # AI 音乐引擎（ACE-Step 1.5）：全部路径可配置且默认相对项目根目录，
+            # 便于整目录打包迁移到其他电脑。权重/代码仓库缺失时引擎自动不注册。
+            "music_venv_python": "",
+            "music_model_dir": str(Path(__file__).resolve().parents[2] / "models" / "ace-step-1.5"),
+            "music_repo_dir": str(Path(__file__).resolve().parents[2] / "vendor" / "ACE-Step-1.5"),
+            "music_lm_model": "acestep-5Hz-lm-1.7B",
+            "music_max_tasks_per_worker": 4,
             # Web 前端服务固定监听 127.0.0.1:8765（仅本机可访问）。
             "web_host": "127.0.0.1",
             "web_port": 8765,
@@ -33,11 +40,14 @@ class ConfigStore:
         }
 
     # 整型配置项及其允许范围。
-    _INT_RANGES: dict[str, tuple[int, int]] = {"web_port": (1, 65535)}
+    _INT_RANGES: dict[str, tuple[int, int]] = {
+        "web_port": (1, 65535),
+        "music_max_tasks_per_worker": (1, 50),
+    }
     # 非路径的普通字符串键（不做 Path 展开，允许留空表示"未配置"）。
-    _FREE_TEXT_KEYS = frozenset({"web_host", "llm_endpoint", "llm_model"})
+    _FREE_TEXT_KEYS = frozenset({"web_host", "llm_endpoint", "llm_model", "music_lm_model"})
     # 允许留空的字符串键。
-    _OPTIONAL_KEYS = frozenset({"image_venv_python", "llm_model", "llm_endpoint"})
+    _OPTIONAL_KEYS = frozenset({"image_venv_python", "llm_model", "llm_endpoint", "music_venv_python"})
 
     def load(self) -> dict[str, Any]:
         if not self.path.exists():

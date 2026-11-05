@@ -1,5 +1,9 @@
 .venv/
 .venv-image/
+.venv-music/
+vendor/
+.tmp_pytest/
+data/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -7,3 +11,4 @@ __pycache__/
 logs/
 output/
 models/
+dist/

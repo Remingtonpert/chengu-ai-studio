@@ -1,4 +1,5 @@
-# 编译 Strata.exe 启动器（使用 Windows 自带的 .NET Framework C# 编译器，无需联网）。
+﻿# 编译辰鹄AI创作中心启动器（使用 Windows 自带的 .NET Framework C# 编译器，无需联网）。
+# 可执行文件名 Strata.exe 为内部技术标识，保留不改；面向用户的文字均为「辰鹄AI创作中心」。
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Source = Join-Path $PSScriptRoot "launcher\StrataLauncher.cs"
@@ -13,7 +14,7 @@ if (-not $csc) {
     throw "未找到 .NET Framework 的 csc.exe 编译器（路径: $cscCandidates）。"
 }
 
-& $csc /nologo /target:exe /platform:anycpu /optimize+ /out:"$Output" "$Source"
+& $csc /nologo /codepage:65001 /target:exe /platform:anycpu /optimize+ /out:"$Output" "$Source"
 if ($LASTEXITCODE -ne 0) {
     throw "启动器编译失败（退出码 $LASTEXITCODE）。"
 }

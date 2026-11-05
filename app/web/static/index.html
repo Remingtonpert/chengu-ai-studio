@@ -3,81 +3,214 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Strata 本地控制台</title>
+<title>辰鹄AI创作中心</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
-<header>
-  <h1>Strata <span class="sub">本地生成控制台</span></h1>
-  <div class="health" id="health">连接中…</div>
-</header>
+<body class="app">
 
-<main>
-  <section class="card">
-    <h2>引擎状态</h2>
-    <div id="engines" class="engines"><div class="muted">加载中…</div></div>
-  </section>
+<!-- 左侧：会话列表 -->
+<aside class="sidebar" id="sidebar">
+  <div class="side-head">
+    <div class="brand">辰鹄<span>AI创作中心</span></div>
+    <button class="icon-btn" id="collapse-side" title="折叠侧栏">⟨</button>
+  </div>
+  <button class="btn-new" id="new-session">＋ 新建会话</button>
+  <div class="side-list" id="session-list"></div>
+</aside>
+<button class="side-expand hidden" id="expand-side" title="展开会话列表">⟩</button>
 
-  <section class="card">
-    <h2>新建生成任务</h2>
-    <form id="task-form">
-      <div class="row">
-        <label>任务类型
-          <select id="task-type">
-            <option value="image">图像</option>
-            <option value="video">视频</option>
-            <option value="music">音乐</option>
-          </select>
-        </label>
-        <label>引擎
-          <select id="engine-id"></select>
-        </label>
-        <label>模型 ID（可选）
-          <input id="model-id" type="text" placeholder="留空使用引擎默认模型">
-        </label>
-      </div>
-      <label>提示词
-        <textarea id="prompt" rows="3" placeholder="描述你想生成的内容…" required></textarea>
-      </label>
-      <label>参数（JSON，可选）
-        <input id="parameters" type="text" placeholder='{"width": 1024, "steps": 4}'>
-      </label>
-      <div class="row actions">
-        <button type="submit" id="submit-btn">提交任务</button>
-        <span id="form-message" class="muted"></span>
-      </div>
-    </form>
-  </section>
-
-  <section class="card">
-    <h2>任务列表</h2>
-    <div class="row filters">
-      <label>状态筛选
-        <select id="status-filter">
-          <option value="">全部</option>
-          <option value="queued">排队中</option>
-          <option value="preparing">准备中</option>
-          <option value="running">执行中</option>
-          <option value="completed">已完成</option>
-          <option value="failed">失败</option>
-          <option value="cancelled">已取消</option>
-        </select>
-      </label>
-      <button type="button" id="refresh-btn">刷新</button>
+<!-- 中间：对话流 + 底部 Imagine 输入 -->
+<main class="main" id="main">
+  <header class="topbar">
+    <div class="top-title" id="session-title">Imagine</div>
+    <div class="top-actions">
+      <span class="pill" id="engine-pill">引擎检测中…</span>
+      <span class="pill" id="health-pill">连接中…</span>
+      <button class="icon-btn" id="toggle-settings" title="参数面板">⚙</button>
     </div>
-    <table id="task-table">
-      <thead>
-        <tr>
-          <th>任务</th><th>类型 / 引擎</th><th>状态</th><th>进度</th>
-          <th>创建时间</th><th>产物</th><th>操作</th>
-        </tr>
-      </thead>
-      <tbody id="task-body"><tr><td colspan="7" class="muted">加载中…</td></tr></tbody>
-    </table>
-  </section>
+  </header>
+
+  <!-- 模式切换 Tab：前端路由，后端接口按 task_type 分开 -->
+  <nav class="mode-tabs" id="mode-tabs">
+    <button class="tab on" data-mode="t2i">文生图<span class="tab-badge"></span></button>
+    <button class="tab" data-mode="i2i">图生图<span class="tab-badge"></span></button>
+    <button class="tab" data-mode="t2v">文生视频<span class="tab-badge"></span></button>
+    <button class="tab" data-mode="i2v">图生视频<span class="tab-badge"></span></button>
+    <button class="tab" data-mode="music">AI音乐<span class="tab-badge"></span></button>
+  </nav>
+
+  <div class="feed" id="feed">
+    <div class="empty" id="feed-empty">
+      <div class="empty-logo">辰鹄AI创作中心</div>
+      <p>在下方输入提示词，Enter 提交。顶部 Tab 切换业务：文生图 / 图生图 / 视频 / AI音乐。</p>
+      <p class="muted">同一会话可混排图片、视频、音频记录 · 悬停结果图显示 V（变化）/ U（放大）</p>
+    </div>
+  </div>
+
+  <footer class="composer" id="composer">
+    <div class="ref-zone hidden" id="ref-zone">
+      <button class="btn-file" id="pick-ref" type="button">🖼 选择垫图</button>
+      <span class="muted" id="ref-zone-text">也可以把本机图片拖到这里 / Ctrl+V 粘贴 · 路径自动预填</span>
+    </div>
+    <div class="ref-chip hidden" id="ref-chip"></div>
+    <input type="file" id="file-input" accept="image/*" class="hidden">
+    <div class="composer-row">
+      <textarea class="prompt" id="prompt-input" rows="1"
+        placeholder="发出想象…　Enter 生成 · Shift+Enter 换行 · 粘贴/拖入图片做图生图"></textarea>
+      <button class="btn-imagine" id="imagine-btn">想象 <span class="kbd">Enter</span></button>
+    </div>
+    <div class="composer-meta" id="composer-meta"></div>
+  </footer>
 </main>
 
-<div id="toast" class="toast hidden"></div>
+<!-- 右侧：可折叠参数面板 -->
+<aside class="panel" id="settings">
+  <div class="panel-head">参数设置
+    <button class="icon-btn" id="close-settings" title="收起面板">⟩</button>
+  </div>
+  <div class="panel-body">
+    <section data-modes="t2i i2i t2v i2v">
+      <h4>引擎</h4>
+      <select id="engine-select" class="select"></select>
+      <div class="engine-state-row">
+        <span id="engine-state" class="muted"></span>
+        <button class="btn-mini" id="engine-restart">重启引擎</button>
+      </div>
+      <p class="hint" id="engine-mode-hint"></p>
+    </section>
+    <section data-modes="t2i i2i">
+      <h4>宽高比</h4>
+      <div class="chips" id="aspect-chips">
+        <button class="chip on" data-w="1024" data-h="1024">1:1</button>
+        <button class="chip" data-w="896" data-h="1152">2:3</button>
+        <button class="chip" data-w="1152" data-h="896">3:2</button>
+        <button class="chip" data-w="1216" data-h="704">16:9</button>
+        <button class="chip" data-w="704" data-h="1216">9:16</button>
+        <button class="chip" data-w="512" data-h="512">512</button>
+      </div>
+      <div class="slider-row">
+        <label for="width-range">宽</label>
+        <input type="range" id="width-range" min="512" max="1408" step="8">
+        <input type="number" id="width-num" class="num" min="256" max="1536" step="8">
+      </div>
+      <div class="slider-row">
+        <label for="height-range">高</label>
+        <input type="range" id="height-range" min="512" max="1408" step="8">
+        <input type="number" id="height-num" class="num" min="256" max="1536" step="8">
+      </div>
+      <p class="hint" id="vram-hint"></p>
+    </section>
+    <section data-modes="i2i">
+      <h4>重绘强度 strength <span id="strength-label" class="muted"></span></h4>
+      <input type="range" id="strength-range" min="0.1" max="1" step="0.05">
+      <p class="hint">低（0.3–0.5）贴近垫图构图；高（0.7–1.0）大改画面。V/U 用固定强度，不受此滑块影响。</p>
+    </section>
+    <section data-modes="t2v i2v">
+      <h4>视频尺寸</h4>
+      <div class="chips" id="aspect-chips-v">
+        <button class="chip" data-w="512" data-h="384">4:3</button>
+        <button class="chip" data-w="384" data-h="512">3:4</button>
+        <button class="chip" data-w="448" data-h="448">1:1</button>
+        <button class="chip" data-w="640" data-h="368">16:9</button>
+      </div>
+      <div class="slider-row">
+        <label for="vwidth-range">宽</label>
+        <input type="range" id="vwidth-range" min="256" max="1024" step="16">
+        <input type="number" id="vwidth-num" class="num" min="256" max="1024" step="16">
+      </div>
+      <div class="slider-row">
+        <label for="vheight-range">高</label>
+        <input type="range" id="vheight-range" min="256" max="1024" step="16">
+        <input type="number" id="vheight-num" class="num" min="256" max="1024" step="16">
+      </div>
+      <p class="hint" id="v-vram-hint"></p>
+    </section>
+    <section data-modes="t2v i2v">
+      <h4>时长 <span id="frames-label" class="muted"></span></h4>
+      <input type="range" id="frames-range" min="5" max="161" step="4">
+      <p class="hint">导出固定 24fps；帧数自动取到 4n+1（Anima 3D-VAE 时间压缩约束），越长越吃显存与时间。</p>
+    </section>
+    <section data-modes="t2v i2v">
+      <h4>运动幅度</h4>
+      <input type="range" min="0" max="100" value="50" disabled>
+      <p class="hint">Anima 引擎当前不暴露运动幅度/帧率参数（未开放参数会被后端白名单拒绝），此控件保留占位，待引擎支持后启用。</p>
+    </section>
+    <section data-modes="t2i i2i t2v i2v">
+      <h4>Steps <span id="steps-label" class="muted"></span></h4>
+      <input type="range" id="steps-range" min="1" max="12" step="1">
+      <p class="hint" id="steps-hint">schnell 推荐 4 步；更多步数收益低且更慢。</p>
+    </section>
+    <section data-modes="t2i i2i t2v i2v">
+      <h4>Seed</h4>
+      <div class="seed-row">
+        <label class="switch"><input type="checkbox" id="seed-lock">固定</label>
+        <input type="number" id="seed-num" class="num wide" min="0" step="1" placeholder="随机">
+        <button class="btn-mini" id="seed-dice" title="随机种子">🎲</button>
+      </div>
+      <p class="hint" id="seed-hint">不固定时，一次想象 = 4 个不同 seed；固定时用连续 4 个 seed。</p>
+    </section>
+    <section data-modes="t2i i2i t2v i2v">
+      <h4>负面提示词</h4>
+      <textarea id="negative-input" class="textarea-sm" rows="2" placeholder="模糊、低质量、水印…"></textarea>
+    </section>
+    <section data-modes="t2i i2i t2v i2v music">
+      <h4>风格 / 曲风（点击追加到提示词）</h4>
+      <div class="chips" id="style-chips">
+        <button class="chip" data-suffix="photorealistic, professional photography, natural lighting">摄影</button>
+        <button class="chip" data-suffix="anime key visual, clean line art, cel shading">动漫</button>
+        <button class="chip" data-suffix="cyberpunk, neon lights, cinematic, high detail">赛博朋克</button>
+        <button class="chip" data-suffix="oil painting, impasto brushwork, classical composition">油画</button>
+        <button class="chip" data-suffix="watercolor illustration, soft washes, paper texture">水彩</button>
+        <button class="chip" data-suffix="3d render, octane, studio lighting, ultra detailed">3D</button>
+        <button class="chip" data-suffix="minimalist, flat design, generous negative space">极简</button>
+      </div>
+      <div class="chips hidden" id="genre-chips">
+        <button class="chip" data-suffix="synthwave, retro analog synths, driving beat">电子</button>
+        <button class="chip" data-suffix="lo-fi hip hop, dusty drums, mellow, chillhop">Lo-Fi</button>
+        <button class="chip" data-suffix="epic orchestral, cinematic strings, powerful brass">管弦</button>
+        <button class="chip" data-suffix="acoustic folk, warm guitar, intimate">民谣</button>
+        <button class="chip" data-suffix="jazz piano trio, swing, smoky lounge">爵士</button>
+        <button class="chip" data-suffix="ambient, drone, meditative, slow evolving">氛围</button>
+        <button class="chip" data-suffix="metal, distorted guitars, double kick, aggressive">金属</button>
+      </div>
+    </section>
+    <section data-modes="music">
+      <h4>音乐引擎状态</h4>
+      <p class="hint warn">已接入 ACE-Step 1.5（权重 MIT，本地离线推理，无云端 API；最低 12GB 显存）。支持 4-10 分钟带人声完整乐曲或纯器乐，输出 48kHz wav；不支持超长多轨道复杂编曲。提交前会检查显存并弹出能力边界确认；显存不足会直接拦截。</p>
+      <h4>BPM <span id="bpm-label" class="muted"></span></h4>
+      <input type="range" id="bpm-range" min="60" max="180" step="1">
+      <h4>目标时长 <span id="music-dur-label" class="muted"></span></h4>
+      <input type="range" id="music-dur-range" min="30" max="480" step="30">
+      <p class="hint">12GB 显存档位实际最长约 8 分钟（480s），超出会被引擎自动截到上限，产物按真实时长为准。</p>
+    </section>
+    <section data-modes="t2i i2i t2v i2v">
+      <h4>高级参数（JSON，可选）</h4>
+      <textarea id="advanced-json" class="textarea-sm" rows="2" placeholder='{"strength": 0.6}'></textarea>
+      <p class="hint" id="advanced-hint">白名单：width height steps seed negative_prompt init_image_path strength</p>
+    </section>
+  </div>
+</aside>
+
+<!-- 图片放大查看 -->
+<div class="lightbox hidden" id="lightbox">
+  <button class="lb-close icon-btn" id="lb-close" title="关闭 (Esc)">✕</button>
+  <button class="lb-nav lb-prev" id="lb-prev" title="上一张 (←)">‹</button>
+  <figure class="lb-fig">
+    <img id="lb-img" alt="生成结果">
+    <figcaption class="lb-bar">
+      <div class="lb-meta" id="lb-meta"></div>
+      <div class="lb-actions">
+        <button class="btn-mini" id="lb-v">V 变化</button>
+        <button class="btn-mini" id="lb-u">U 放大</button>
+        <a class="btn-mini" id="lb-save" download>⬇ 保存本地</a>
+        <button class="btn-mini" id="lb-copy">复制提示词</button>
+      </div>
+    </figcaption>
+  </figure>
+  <button class="lb-nav lb-next" id="lb-next" title="下一张 (→)">›</button>
+</div>
+
+<div class="toast hidden" id="toast"></div>
 <script src="/static/app.js"></script>
 </body>
 </html>

@@ -20,9 +20,13 @@ from PySide6.QtWidgets import (
 
 from app.core.config import ConfigStore
 from app.core.hardware import get_disk_free_gib, get_gpu_info
-from app.engine_registration import IMAGE_ENGINE_ID, VIDEO_ENGINE_ID
+from app.engine_registration import (
+    IMAGE_ENGINE_ID,
+    MUSIC_ENGINE_ID,
+    VIDEO_ENGINE_ID,
+)
 from app.tasks.engine_manager import EngineManager
-from app.tasks.models import TaskStatus
+from app.tasks.models import TaskRequest, TaskStatus
 from app.tasks.service import TaskService
 from app.ui.pages.engine_status_page import EngineStatusPage
 from app.ui.pages.settings_page import SettingsPage
@@ -66,6 +70,7 @@ class MainWindow(QMainWindow):
         }
         self._image_ready = IMAGE_ENGINE_ID in registered
         self._video_ready = VIDEO_ENGINE_ID in registered
+        self._music_ready = MUSIC_ENGINE_ID in registered
         self._theme_dark: bool | None = None
         self.setWindowTitle("辰鹄 AI 创作中心")
         self.resize(1180, 760)
@@ -129,6 +134,8 @@ class MainWindow(QMainWindow):
                     can_generate=is_generator,
                     engine_ready=self._workspace_engine_ready(key),
                     engine_label=self._workspace_engine_label(key),
+                    kind=key,
+                    on_generate=self._submit_generation,
                 )
             self.stack.addWidget(page)
 
@@ -186,7 +193,12 @@ class MainWindow(QMainWindow):
             if (models_dir / "anima-image2video").exists():
                 model_parts.append("Anima 视频模型已就位")
             else:
-                model_parts.append("Anima 视频引擎已接入，权重待下载")
+                model_parts.append("Anima 视频引擎已接入，权重待确认下载")
+        if self._music_ready:
+            if (models_dir / "ace-step-1.5").exists():
+                model_parts.append("ACE-Step 1.5 音乐权重已就位（10.03 GB 校验通过）")
+            else:
+                model_parts.append("ACE-Step 1.5 引擎已接入，权重待下载")
         if model_parts:
             model_line = "模型：" + "；".join(model_parts)
         else:
@@ -204,12 +216,46 @@ class MainWindow(QMainWindow):
         layout.addStretch(1)
         return page
 
+    _GENERATOR_ENGINES = {
+        "image": IMAGE_ENGINE_ID,
+        "video": VIDEO_ENGINE_ID,
+        "music": MUSIC_ENGINE_ID,
+    }
+
+    def _submit_generation(self, kind: str, prompt: str, parameters: dict) -> str:
+        """桌面端生成入口：与 Web 模式走同一个 TaskService 与引擎 worker。"""
+        if self.task_service is None:
+            raise RuntimeError("任务服务未连接")
+        engine_id = self._GENERATOR_ENGINES.get(kind)
+        if engine_id is None:
+            raise RuntimeError(f"未知生成类型：{kind}")
+        record = self.task_service.submit_task(
+            TaskRequest(
+                task_type=kind,
+                engine_id=engine_id,
+                prompt=prompt,
+                parameters=parameters,
+            )
+        )
+        self.logger.info(
+            "桌面端提交生成任务 task_id=%s type=%s engine=%s",
+            record.task_id,
+            kind,
+            engine_id,
+        )
+        return (
+            f"已提交任务 {record.task_id[:8]}（状态：{record.status.value}）。"
+            "在「任务队列」查看进度，完成后在「生成历史」查看产物。"
+        )
+
     def _engine_names(self) -> list[str]:
         names = []
         if self._image_ready:
             names.append("FLUX 图像")
         if self._video_ready:
             names.append("Anima 视频")
+        if self._music_ready:
+            names.append("ACE-Step 音乐")
         return names
 
     def _engine_kinds(self) -> list[str]:
@@ -218,6 +264,8 @@ class MainWindow(QMainWindow):
             kinds.append("图像")
         if self._video_ready:
             kinds.append("视频")
+        if self._music_ready:
+            kinds.append("音乐")
         return kinds
 
     def _phase_footer_text(self) -> str:
@@ -237,6 +285,8 @@ class MainWindow(QMainWindow):
             return self._image_ready
         if key == "video":
             return self._video_ready
+        if key == "music":
+            return self._music_ready
         return False
 
     @staticmethod
@@ -245,6 +295,8 @@ class MainWindow(QMainWindow):
             return "FLUX.1-schnell（图像）"
         if key == "video":
             return "Anima（图生视频）"
+        if key == "music":
+            return "ACE-Step 1.5（音乐）"
         return ""
 
     def _apply_current_theme(self) -> None:
@@ -263,16 +315,24 @@ class MainWindow(QMainWindow):
         kinds = self._engine_kinds()
         descriptions = {
             "image": (
-                "提交图片创作描述。FLUX.1-schnell 已接入本地引擎，真机验收通过后开放生成入口。"
+                "提交图片创作描述。FLUX.1-schnell 已接入本地引擎并通过真机验证，"
+                "点击「生成」提交真实任务进入本地队列；不提供模拟生成。"
                 if self._image_ready
                 else "提交图片创作描述。模型和生成按钮将在真实引擎完成验证后启用。"
             ),
             "video": (
-                "图生视频引擎（Anima）已接入，真机验收通过后开放生成入口；不提供模拟生成。"
+                "图生视频引擎（Anima）已接入并可提交任务；"
+                "视频权重尚未确认下载，缺权重时任务会在执行阶段诚实报错，不会伪造产物。"
                 if self._video_ready
                 else "视频生成引擎尚未安装或验证；当前不提供模拟生成。"
             ),
-            "music": "音乐生成引擎尚未安装或验证；当前不提供模拟生成。",
+            "music": (
+                "提交歌曲描述与歌词（支持中文）。ACE-Step 1.5 已接入本地引擎，"
+                "权重 10.03 GB 已校验就位；生成真实 48kHz wav，"
+                "12GB 显存档位自动限长 8 分钟；不提供模拟生成。"
+                if self._music_ready
+                else "音乐生成引擎尚未安装或验证；当前不提供模拟生成。"
+            ),
             "queue": "显示 SQLite 中持久化的排队与活动任务。",
             "history": "显示 SQLite 中持久化的已结束任务。",
             "models": "模型清单、校验与下载确认将在后续阶段实现。",

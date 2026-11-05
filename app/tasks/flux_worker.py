@@ -107,9 +107,14 @@ class FluxTaskAdapter:
 
     async def generate(self, request: TaskRequest) -> TaskResult:
         engine = self._get_engine()
+        # 防御性收口：即便上游 JSON 里混进非字符串提示词，也在进入引擎前规整为合法 str。
+        from app.engine.prompt_utils import coerce_prompt_text
+
         params: Dict[str, Any] = dict(request.parameters or {})
+        if "negative_prompt" in params:
+            params["negative_prompt"] = coerce_prompt_text(params["negative_prompt"])
         result = await engine.generate_image(
-            prompt=request.prompt,
+            prompt=coerce_prompt_text(request.prompt) or request.prompt,
             width=params.get("width", 512),
             height=params.get("height", 512),
             steps=params.get("steps"),
