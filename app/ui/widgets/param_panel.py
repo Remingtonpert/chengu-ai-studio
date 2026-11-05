@@ -916,9 +916,15 @@ class ParamPanel(QScrollArea):
                     if current
                     else "?"
                 )
-                self.engine_state.setText(
-                    (current.message or label) if current else label
-                )
+                state_text = (current.message or label) if current else label
+                if modality == "music" and current and current.state == "stopped":
+                    # 音乐引擎懒启动：注册成功但 worker 尚未拉起时给明确的 ready 文案，
+                    # 避免看起来像「不可用」。
+                    state_text = (
+                        "ACE-Step 1.5（音乐）已注册 · 提交后懒启动"
+                        "（首次加载权重约 10.03 GB，最低 12GB 显存）"
+                    )
+                self.engine_state.setText(state_text)
         finally:
             self.engine_select.blockSignals(False)
             self._syncing = False

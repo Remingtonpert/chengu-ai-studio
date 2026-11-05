@@ -11,4 +11,5 @@ __pycache__/
 logs/
 output/
 models/
-dist/.tmp_shots/
+dist/
+.tmp_shots/

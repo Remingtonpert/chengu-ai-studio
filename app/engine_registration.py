@@ -128,6 +128,15 @@ def register_production_engines(
 
     venv_value = str(config.get("image_venv_python") or "").strip()
     python_exe = Path(venv_value) if venv_value else default_image_venv_python()
+    if venv_value and not python_exe.is_file():
+        # 历史上曾有机器把这里配成系统 Python 或路径写废，导致 worker 用错环境；
+        # 配置值不可用时不硬失败，回退到项目默认 .venv-image 并记录告警。
+        logger.warning(
+            "配置的 image_venv_python 不存在：%s；回退到项目默认环境 %s",
+            python_exe,
+            default_image_venv_python(),
+        )
+        python_exe = default_image_venv_python()
     if not python_exe.is_file():
         logger.error(
             "图片/视频引擎虚拟环境解释器不存在：%s；跳过真实引擎注册。"
@@ -178,6 +187,13 @@ def register_production_engines(
     # 环境或代码仓库缺失时不注册，前端音乐入口会诚实提示，不会伪造输出。
     music_python_value = str(config.get("music_venv_python") or "").strip()
     music_python = Path(music_python_value) if music_python_value else default_music_venv_python()
+    if music_python_value and not music_python.is_file():
+        logger.warning(
+            "配置的 music_venv_python 不存在：%s；回退到项目默认环境 %s",
+            music_python,
+            default_music_venv_python(),
+        )
+        music_python = default_music_venv_python()
     music_repo = Path(str(config.get("music_repo_dir") or default_music_repo_dir()))
     music_models = Path(str(config.get("music_model_dir") or default_music_model_dir()))
     if "music" in disabled:
