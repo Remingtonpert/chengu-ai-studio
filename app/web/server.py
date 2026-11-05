@@ -119,6 +119,8 @@ def _hardware_snapshot() -> dict[str, Any]:
     return {"gpu": gpu, "memory_total_gb": total_gb, "memory_free_gb": free_gb}
 
 _VALID_TASK_TYPES = ("image", "video", "music")
+# 垫图（init_image_path）允许的扩展名；worker 侧 flux/anima 解码同样按这些格式校验。
+_VALID_INPUT_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp"})
 
 
 @dataclass
@@ -355,6 +357,33 @@ class WebApplication:
             raise HttpError(400, "input_files 必须是字符串数组")
         if not isinstance(parameters, dict):
             raise HttpError(400, "parameters 必须是 JSON 对象")
+        # 图生图/图生视频垫图必须是本机已存在的具体图片文件：
+        # 把目录、不存在的相对路径在进入 worker 之前就挡下，给出明确提示。
+        init_image = parameters.get("init_image_path")
+        if init_image not in (None, ""):
+            if not isinstance(init_image, str) or not init_image.strip():
+                raise HttpError(400, "init_image_path 必须是非空字符串（垫图文件的本机绝对路径）")
+            ref_path = Path(init_image.strip())
+            if not ref_path.is_absolute():
+                raise HttpError(
+                    400,
+                    f"垫图必须是绝对路径，例如 D:\\ChenguAI\\uploads\\photo.png；收到的是：{init_image}",
+                )
+            if ref_path.is_dir():
+                raise HttpError(
+                    400,
+                    f"垫图必须选具体图片文件，不能是文件夹：{init_image}",
+                )
+            if not ref_path.is_file():
+                raise HttpError(400, f"垫图文件不存在：{init_image}")
+            if ref_path.suffix.lower() not in _VALID_INPUT_IMAGE_SUFFIXES:
+                raise HttpError(
+                    400,
+                    "垫图格式需为 "
+                    + " / ".join(sorted(_VALID_INPUT_IMAGE_SUFFIXES))
+                    + f"；收到的是：{ref_path.name}",
+                )
+            parameters["init_image_path"] = str(ref_path)
         request = TaskRequest(
             task_type=task_type,
             engine_id=engine_id.strip(),

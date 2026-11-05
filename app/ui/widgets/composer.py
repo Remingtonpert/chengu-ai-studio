@@ -242,7 +242,9 @@ class Composer(QFrame):
     def has_ref(self) -> bool:
         # 与网页端一致：只要挂过垫图（chip 显示）就算有 ref，
         # 路径为空时走「待确认路径」而不是「未挂」。
-        return self.ref_chip.isVisible()
+        # 用 isHidden 而非 isVisible：后者受整个窗口可见性影响，
+        # 窗口未显示（含离屏测试）时会把已挂载的垫图误判为未挂。
+        return not self.ref_chip.isHidden()
 
     def clear_ref(self) -> None:
         self._clear_ref()

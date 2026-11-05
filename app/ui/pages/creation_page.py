@@ -54,6 +54,7 @@ from app.ui.widgets.param_panel import (
 from app.ui.widgets.tiles import IMAGE_SUFFIXES, VIDEO_SUFFIXES, output_paths
 
 ABS_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
+REF_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp"})
 NEEDS_REF = {"i2i", "i2v"}
 VIDEO_FPS = 24
 MUSIC_MIN_VRAM_MB = 12_288
@@ -420,6 +421,23 @@ class CreationPage(QWidget):
         )
 
     # ------------------------------------------------------- 高级参数解析
+    def _ref_path_error(self, raw: str) -> str | None:
+        """垫图必须是本机已存在的具体图片文件；目录/不存在/不支持格式返回明确提示。"""
+        try:
+            p = Path(str(raw))
+        except (OSError, ValueError) as exc:
+            return f"垫图路径无法解析：{exc}"
+        if p.is_dir():
+            return f"垫图请选择具体图片文件，不能是文件夹：{raw}"
+        if not p.is_file():
+            return f"垫图文件不存在（请选择具体图片文件，不是文件夹）：{raw}"
+        if p.suffix.lower() not in REF_IMAGE_SUFFIXES:
+            return (
+                "垫图格式需为 png / jpg / jpeg / webp / bmp；收到的是："
+                + (p.suffix or "无扩展名")
+            )
+        return None
+
     def _parse_advanced(self, modality: str) -> dict[str, Any]:
         text = self.panel.advanced_text()
         if not text:
@@ -439,6 +457,11 @@ class CreationPage(QWidget):
         rejected: list[str] = []
         for key, value in data.items():
             if key in whitelist:
+                if key == "init_image_path":
+                    bad = self._ref_path_error(str(value))
+                    if bad:
+                        self.toast.show("高级参数 " + bad, "error")
+                        continue
                 clean[key] = value
             else:
                 rejected.append(str(key))
@@ -522,6 +545,10 @@ class CreationPage(QWidget):
                     "D:\\ChenguAI\\uploads\\photo.png",
                     "error",
                 )
+                return
+            err = self._ref_path_error(ref)
+            if err:
+                self.toast.show(err, "error")
                 return
             extra["init_image_path"] = ref
             cut = max(ref.rstrip("\\/").rfind("\\"), ref.rstrip("\\/").rfind("/"))

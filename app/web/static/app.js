@@ -259,8 +259,8 @@ function syncAll() {
     $("negative-input").value = state.p.negative;
     $("advanced-json").value = state.p.advanced || "";
     $("advanced-hint").textContent = modality === "video"
-      ? "白名单：width height num_frames steps seed negative_prompt init_image_path"
-      : "白名单：width height steps seed negative_prompt init_image_path strength";
+      ? "白名单：width height num_frames steps seed negative_prompt init_image_path；init_image_path 需为已存在的具体图片文件绝对路径（不能是文件夹）"
+      : "白名单：width height steps seed negative_prompt init_image_path strength；init_image_path 需为已存在的具体图片文件绝对路径（不能是文件夹）";
   }
   syncMusic();
   updateComposerMeta();
@@ -311,6 +311,28 @@ function setMode(mode) {
   els.prompt.focus();
 }
 
+const REF_IMAGE_SUFFIXES = [".png", ".jpg", ".jpeg", ".webp", ".bmp"];
+
+/* 浏览器无法探测磁盘，但目录尾巴与不支持的扩展名可以先行拦截；
+   文件是否真实存在由后端 _submit_task 复核。 */
+function refShapeError(raw) {
+  const path = String(raw || "").trim();
+  if (!path) return "参考图需要本机完整路径，例如 D:\\ChenguAI\\uploads\\photo.png";
+  if (!/^[A-Za-z]:[\\/]/.test(path)) {
+    return "参考图路径必须是盘符开头的绝对路径，例如 D:\\ChenguAI\\uploads\\photo.png；收到的是：" + path;
+  }
+  if (/[\\/]+$/.test(path)) {
+    return "垫图请选择具体图片文件，不能是文件夹：" + path;
+  }
+  const name = path.slice(Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/")) + 1);
+  const dot = name.lastIndexOf(".");
+  const suffix = dot > 0 ? name.slice(dot).toLowerCase() : "";
+  if (!REF_IMAGE_SUFFIXES.includes(suffix)) {
+    return "垫图格式需为 png / jpg / jpeg / webp / bmp；收到的是：" + (name || path);
+  }
+  return null;
+}
+
 function parseAdvanced() {
   const text = (state.p.advanced || "").trim();
   if (!text) return {};
@@ -321,7 +343,12 @@ function parseAdvanced() {
     const rejected = [];
     const allowed = MODALITY[state.mode] === "video" ? VIDEO_ALLOWED_PARAMS : ALLOWED_PARAMS;
     for (const [key, value] of Object.entries(parsed)) {
-      if (allowed.has(key)) clean[key] = value; else rejected.push(key);
+      if (!allowed.has(key)) { rejected.push(key); continue; }
+      if (key === "init_image_path") {
+        const bad = refShapeError(value);
+        if (bad) { showToast("高级参数 " + bad, "error"); continue; }
+      }
+      clean[key] = value;
     }
     if (rejected.length) showToast(`高级参数被忽略（不在白名单）：${rejected.join(", ")}`, "error");
     return clean;
@@ -716,6 +743,8 @@ async function imagine() {
     const path = state.ref.path.trim();
     if (!path) { showToast("参考图需要本机完整路径（浏览器拿不到剪贴板图片的磁盘路径）。填路径后再提交，或点 ✕ 取消引用。", "error"); return; }
     if (!/^[A-Za-z]:[\\/]/.test(path)) { showToast("参考图路径必须是盘符开头的绝对路径，例如 D:\\ChenguAI\\uploads\\photo.png", "error"); return; }
+    const shapeError = refShapeError(path);
+    if (shapeError) { showToast(shapeError, "error"); return; }
     extraParams.init_image_path = path;
     const cut = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
     if (cut > 1) { state.settings.refDir = path.slice(0, cut); persist(); } // 记住目录，下次预填
@@ -1041,7 +1070,7 @@ function renderRefChip() {
   els.refChip.textContent = "";
   const img = el("img"); img.src = state.ref.previewUrl; img.alt = "";
   const input = el("input", "path");
-  input.placeholder = "参考图的本机完整路径（绝对路径），如 D:\\ChenguAI\\uploads\\photo.png";
+  input.placeholder = "参考图的本机完整路径（绝对路径、具体图片文件），如 D:\\ChenguAI\\uploads\\photo.png";
   input.value = state.ref.path;
   input.addEventListener("input", () => {
     state.ref.path = input.value.trim();
