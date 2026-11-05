@@ -55,23 +55,11 @@
 2. 逐项审查文本编码器、VAE、tokenizer、量化 checkpoint、LoRA 和随应用分发的其他模型。
 3. 按最终安装锁文件生成软件 SBOM、模型清单及 `THIRD_PARTY_NOTICES.md`。
 4. 审核商业用途、再分发和目标地区限制；需要时由专业法律顾问确认。
-| **图片** | FLUX.1-dev | FLY-1.1* | ⚠️ 待确认 | ✅ | 中 |
-| **图片** | SDXL | Stable Diffusion | ⚠️ 需检查 | ✅ | 中 |
-| **视频** | Open-Sora (代码) | Apache-2.0 | ✅ | ✅ | 低 |
-| **视频** | Open-Sora (模型) | 待审计 | 🔴 未知 | ⚠️ 可能 | 高 |
-| **视频** | SVD | Stability AI* | ⚠️ 待确认 | ✅ | 中 |
-| **音频** | - | - | - | - | 🔴 无合格方案 |
 
-*\*表示需要进一步审查的许可证*
+## 2026-11-05 集成后增补
 
----
-
-## 七、Phase 0 交付
-
-✅ `docs/LICENE_AUDIT.md` (本文件)
-
-### 下一步行动
-
-1. 等待用户确认调研结论
-2. 如果同意，继续 Phase 1 开发
-3. 同时开始编写 `HARDWARE_COMPATIBILITY.md`, `ARCHITECTURE.md`, `DEVELOPMENT_PLAN.md`
+- FLUX.1-schnell：权重快照 23 文件 / 33.73 GB 已逐文件 SHA-256 校验并锁定，仅本机推理使用，不随仓库分发（`models/` 在 `.gitignore`）；Apache-2.0 归属文本随快照保留。
+- ACE-Step 1.5：官方代码仓库声明 MIT；四文件权重共 10.03 GB 已逐文件校验（`.gitignore` 排除，不分发）。HF 权重仓库内各子模型的 license 元数据仍未逐项复核，**商用/再分发结论继续悬置**；`.cache` 目录（约 3.9GB）属下载残留，清理与否待用户确认。
+- Anima 视频：代码已接入注册链路，但权重（社区类许可）未下载、未集成——待用户逐项确认许可后再下载；当前视频能力在未注册/未就绪状态下对提交诚实报错。
+- 依赖清点：主 `.venv`（PySide6）、`.venv-image`（torch cu130/diffusers/transformers 5.x）、`.venv-music`（transformers<4.58）三环境已实际建立；正式 SBOM 与 `THIRD_PARTY_NOTICES.md` 仍未生成，属发布前必做项（见上节 3）。
+- 本节以下旧草稿残留（一张无出处的半成品许可矩阵表与「Phase 0 交付」清单）已于 2026-11-05 清理：该表把 FLUX.1-dev 标为「待确认」、含 SDXL/Open-Sora/SVD 等早已排除的候选且无官方出处，与上文正式矩阵冲突，不再保留。审计以本文件上文矩阵与增补为准。

@@ -1,6 +1,6 @@
 # 辰鹄 AI 创作中心架构提案
 
-**状态：Phase 1 桌面骨架与 Phase 2 任务服务已实现；真实引擎尚未接入。** 本文区分已实现服务与待后续阶段完成的推理能力。
+**状态：Phase 1 桌面骨架、Phase 2 任务服务已完成验收；Phase 3 真实引擎已接入（FLUX 本机真实出图、ACE-Step 权重就绪待端到端验收、Anima 权重待用户决策）。** 本文区分已实现服务与待后续阶段完成的推理能力。
 
 ## 目标
 
@@ -39,7 +39,7 @@ tests/
 docs/
 ```
 
-旧 Gradio/CLI 原型（`app/web_ui.py`、`app/scheduler.py`、`app/main.py` 等含占位输出的路径）**已于重构中全部移除**（2026-10 起逐步替换，现已不存在于源码树）。当前两个入口：PySide6 桌面端 `app.bootstrap` 与本地 Web 控制台 `app.web.server`，两者共用同一服务层（模块与接口清单见 `docs/MODULES.md`），桌面依赖位于项目 `.venv`。
+旧 Gradio/CLI 原型（`app/web_ui.py`、`app/scheduler.py`、`app/main.py` 等含占位输出的路径）**已于重构中全部移除**（2026-10 起逐步替换，现已不存在于源码树）。当前两个入口：PySide6 桌面端 `app.bootstrap` 与本地 Web 控制台 `app.web.server`，两者共用同一服务层（模块与接口清单见 `docs/MODULES.md`），桌面依赖位于项目 `.venv`。桌面端 UI 已于 2026-11-05 重构为 MJ 同款三栏创作界面（旧 `WorkspacePage` 等页面已删除，功能并入 `app/ui/pages/creation_page.py` 与 `app/ui/widgets/`）。
 
 ## 模块职责和边界
 
@@ -90,6 +90,9 @@ queued/preparing/running -> cancelled
 
 - 真实引擎已接入并经 `ProcessEngineAdapter` JSONL IPC 运行在独立 venv：FLUX.1-schnell 图像与 Anima 视频（`.venv-image`）、ACE-Step 1.5 音乐（`.venv-music`）；权重按 SHA-256/safetensors 逐文件校验，主进程零 torch。
 - FLUX 已产出多张真实图（英文提示词批 + Web 产物预览实测 200）；中文提示词端到端出图、ACE-Step 端到端音频的真机验收脚本已就位（`scripts\acceptance_flux.ps1` 含中文步骤），执行排队等待显存窗口。
+- 引擎环境统一与兜底（2026-11-05）：`register_production_engines` 解析 `image_venv_python` / `music_venv_python` 时，若配置值指向不存在的解释器，会记录告警并回退到项目默认 `.venv-image` / `.venv-music`（`default_image_venv_python` / `default_music_venv_python`），避免 worker 误用系统 Python；配置值为空时本就直接用默认环境。排查中文出图链路时确认过：曾出现的系统 Python worker 属旧代码进程遗留，现行注册逻辑不会落到系统解释器。
+- 垫图（`init_image_path`）输入校验（2026-11-05）：图生图/图生视频的垫图必须是**盘符开头、真实存在、后缀受支持的具体图片文件**。三层拦截：桌面 `creation_page._ref_path_error`（composer 挂载与高级参数两处，明确提示「不能是文件夹」）、网页 `app.js` 先行拦截目录尾巴与不支持后缀、Web 后端 `app/web/server.py` `_submit_task` 统一预检（非空/绝对/非目录/存在/后缀白名单）并归一化路径；引擎侧仍保留「输入文件不存在」作最后防线。全程不猜测目录、不伪造结果。
+- 桌面端已重构为 MJ 同款三栏创作界面（会话栏 + 五模式 Tab + 参数面板 + 批次流/lightbox/toast，详见根 `README.md` 同名章节与 `docs/MODULES.md` §5）；与 Web 控制台共用队列、同一 worker 协议与同一套提交校验语义。
 - 桌面端三模态生成按钮已接通共享 TaskService（与 Web 同一队列/同一 worker 协议）；TaskService 增加跨进程执行者锁、原子领取与 5 秒轮询，两模式可同时运行。
 - 全部模块与接口的权威清单见 `docs/MODULES.md`；根 `README.md` 为进度真相源。
 

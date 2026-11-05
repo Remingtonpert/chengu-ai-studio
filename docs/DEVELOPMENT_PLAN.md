@@ -55,12 +55,22 @@
 
 ## 当前阻断项
 
-1. 仓库不是 Git 工作树，本轮无法比较/恢复版本控制变更。
-2. 系统 Python 为 3.14.7；Phase 1 项目环境已另建 Python 3.11.9 venv。推理依赖矩阵仍未验证。
-3. 旧 Web/FLUX 路径仍会返回占位图，旧调度器用 `sleep` 模拟完成；新桌面 UI 不调用这些代码。
-4. 图片/视频/音乐真实引擎仍未实现；桌面没有任务提交控件，测试适配器只用于测试。
-5. 模型文件精确大小/revision 未取得；FramePack 权重许可及 ACE-Step v1.5 权重许可待核实。
-6. 旧 FLUX 测试在基础 venv 刻意不含 torch 时跳过；推理环境须在真实引擎阶段单独配置。
+### 现状（2026-11-05 更新）
+
+1. 中文提示词端到端出图与 ACE-Step 端到端音频的真机验收**脚本与链路已就绪**（`scripts\acceptance_flux.ps1` 含「一只橘猫…」中文用例；`scripts\acceptance_music.ps1/.bat`；`scripts\acceptance_chain.ps1` 链式自动重挂），阻塞仅为本机资源：常驻本地引擎占约 11GB 显存 + 42GB 内存，须由用户运行 `scripts\release_local_engine.bat` 释放后自动执行。
+2. Anima 视频权重是否下载**待用户决策**（社区类许可）；未下载前视频引擎不注册或诚实报错，绝不伪造。
+3. 便携完整打包（`scripts\build_portable.ps1`）已具备但尚未执行全量打包，是否现在做待用户确认。
+4. `models\ace-step-1.5\.cache`（约 3.9GB 重复缓存）可否清理待用户确认。
+5. Git 仓库已建立（本地提交身份 Remingtonpert）；是否 push/转公开由用户决定。
+
+### 历史阻断项（2026-10-11 记录，均已解决，保留作审计）
+
+1. ~~仓库不是 Git 工作树~~ → 现已是 Git 仓库，全部改动按功能分 commit。
+2. 系统 Python 为 3.14.7；Phase 1 项目环境已另建 Python 3.11.9 venv。~~推理依赖矩阵仍未验证~~ → `.venv-image`（torch cu130 + transformers 5.x）与 `.venv-music`（transformers<4.58 隔离）已建成并真实推理。
+3. ~~旧 Web/FLUX 路径仍会返回占位图，旧调度器用 sleep 模拟完成~~ → 旧原型文件已全部删除；现行代码失败诚实报错，无任何模拟生成。
+4. ~~图片/视频/音乐真实引擎仍未实现；桌面没有任务提交控件~~ → FLUX 已本机出图；ACE-Step 权重校验就位；桌面端 MJ 同款界面五 Tab 全部可提交。
+5. ~~模型文件精确大小/revision 未取得~~ → FLUX 快照 23 文件 33.73GB、ACE-Step 四文件 10.03GB 已逐文件 SHA-256 校验；FramePack 让位于 Anima（权重待用户决策）。
+6. ~~旧 FLUX 测试在基础 venv 刻意不含 torch 时跳过~~ → 旧测试已移除；验收改由 `.venv-image` 真机脚本承担。
 
 ## 启动桌面程序与测试
 
@@ -81,3 +91,11 @@ py -3.11 -m venv .venv
 ## 下一确认门槛
 
 Phase 2 核心任务生命周期已验证。Phase 3 现状（2026-11-05）：FLUX.1-schnell 首引擎路线已获用户确认并完成集成，本机真实推理与离线复现已产出图片证据；ACE-Step 1.5 音乐引擎已集成、权重就绪，端到端验收与中文提示词出图验收正在排队；Anima 视频权重下载仍处「等用户确认」状态，未确认前不下载、视频能力保持诚实报错。任务服务已跨进程加固（执行者锁 + 原子领取），桌面与 Web 双模式共用同一引擎与队列。
+
+2026-11-05 同日推进（本轮清单执行）：
+
+- **引擎环境统一**：注册逻辑对失效的 `image_venv_python`/`music_venv_python` 配置告警并回退项目默认 venv，worker 不会再漂到系统 Python；旧「系统 Python FLUX worker」确认为旧代码进程遗留并已清除。
+- **垫图必须是具体文件**：桌面 composer/高级参数、网页前端、Web 后端三层拦截目录、不存在路径与不支持格式，提示「请选择具体图片文件，不是文件夹」；后端通过后归一化路径，引擎侧报错保留为最后防线。
+- **桌面端 MJ 同款三栏界面**：会话栏 + 五 Tab 创作流 + 参数面板重构完成，与网页端逐字对齐提交语义；旧 WorkspacePage 十页表单删除；音乐引擎注册后显示明确 ready 文案。
+- **验证记录**：`scripts\smoke_desktop_generation.py` 冒烟全绿（含垫图目录拦截/有效文件放行新断言）；`pytest` 31 passed + 1 skipped；`node --check` 通过；改动已按功能分 commit（未 push）。
+- **待用户动作**：运行 `scripts\release_local_engine.bat` 释放显存窗口后，`acceptance_chain.ps1` 会自动完成中文出图与音乐端到端真机验收；Anima 权重下载、`.cache` 清理、便携打包、push/转公开仍等确认。

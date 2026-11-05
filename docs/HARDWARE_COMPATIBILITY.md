@@ -8,11 +8,11 @@
 | 项目 | 实际观测 | 说明 |
 |---|---|---|
 | 操作系统 | Windows；用户目标为 Windows 11 64 位 | 本次命令未收集 Windows edition/build |
-| Python | 3.14.7 | 当前依赖声明没有形成经验证的 Python 3.14 安装矩阵 |
+| Python | 系统 3.14.7；项目三套 venv 已建成（2026-11-05）：`.venv` 3.11.9（PySide6）、`.venv-image`（torch cu130 + diffusers + transformers 5.x，FLUX/Anima worker）、`.venv-music`（transformers<4.58，与 image 环境硬冲突故隔离） | 推理只发生在后两个 venv 的子进程；主进程零 torch。引擎注册对失效的 venv 配置会告警并回退默认环境 |
 | GPU | NVIDIA GeForce RTX 3060，WDDM | 设备可见 |
-| 显存 | 12,288 MiB 总量；命令执行时约 2,501 MiB 已占用 | 空闲量会随桌面应用变化；模型预算不得假设全部 12GB 可用 |
+| 显存 | 12,288 MiB 总量；命令执行时约 2,501 MiB 已占用 | 空闲量会随桌面应用变化；模型预算不得假设全部 12GB 可用。FLUX 真实出图时的显存/内存实测记录见根 `README.md` 验收数据（worker 权重加载约 31-34GB RAM）；若本机有其他常驻引擎占用显存，验收脚本会自等待而非硬撞 |
 | Driver/CUDA 信息 | NVIDIA-SMI 显示 Driver 617.14、CUDA UMD 13.4 | 这是驱动报告，不代表已安装对应 CUDA Toolkit，也不能决定 PyTorch wheel；应使用 PyTorch 官方安装矩阵 |
-| RAM/磁盘 | 本轮未读取 | 目标说明中的 64GB RAM、约 5TB 磁盘尚未在此环境核实；模型库目录当前为空 |
+| RAM/磁盘 | 64 GB RAM（2026-11-05 复核）；输出盘 `D:\ChenguAI\Output` | 模型库占用：FLUX 快照 33.73 GB + ACE-Step 10.03 GB（另有 `.cache` 残留约 3.9GB 待确认清理） |
 
 ## 兼容性判定规则
 
@@ -26,10 +26,10 @@
 
 | 候选 | 官方硬件说明 | RTX 3060 12GB 结论 |
 |---|---|---|
-| FLUX.1-schnell + Diffusers | Diffusers 官方 FLUX 文档提供 sequential/model CPU offload 和量化示例；说明 Flux 大型组件完整加载约 50GB，低 VRAM 优化示例不是目标机基准；FP8 可能受 GPU/CUDA/PyTorch 组合影响。 | 可进入实测候选，未认证。不得沿用旧文 5.5–6.5GB、30–90s 等估值。 |
-| FramePack | 官方 README 声明支持 NVIDIA RTX 30XX 且至少 6GB；宣称 13B 模型在最低 6GB 设备上工作，较慢显卡速度下降。官方 Windows release 使用 CUDA 12.6/PyTorch 2.6；模型下载超过 30GB。 | 官方声明覆盖 12GB 容量，但目标 RTX 3060 仍未实测。进程集成、实际峰值、模型全量下载空间、Windows 当前依赖都需验证。 |
+| FLUX.1-schnell + Diffusers | Diffusers 官方 FLUX 文档提供 sequential/model CPU offload 和量化示例；说明 Flux 大型组件完整加载约 50GB，低 VRAM 优化示例不是目标机基准；FP8 可能受 GPU/CUDA/PyTorch 组合影响。 | **已实测通过（2026-11）**：RTX 3060 12GB 上 512×512、1024 档、1216×704 均产出真实图片，`HF_HUB_OFFLINE=1` 离线复现成功，显存/耗时如实记录（根 `README.md`）。中文提示词端到端属脚本已就位的排队验收项。 |
+| FramePack | 官方 README 声明支持 NVIDIA RTX 30XX 且至少 6GB；宣称 13B 模型在最低 6GB 设备上工作，较慢显卡速度下降。官方 Windows release 使用 CUDA 12.6/PyTorch 2.6；模型下载超过 30GB。 | 未采用；视频候选已转向 Anima（`app/engine/video/anima.py`，共用 `.venv-image`），其权重为社区类许可，下载与否待用户决策，未推理。 |
 | 原始 HunyuanVideo | 官方主仓库列出 544×960×129 帧 45GB、720p×129 帧 60GB 峰值，并说明在 80GB GPU 测试、测试系统 Linux。FP8 约节省 10GB 的官方表述不能直接代表总需求降至 12GB。 | 排除原始推荐配置。FramePack 是独立低显存候选，不可把其项目声明归因于 Hunyuan 原生推理。 |
-| ACE-Step v1.5 | 官方仓库测试表包含 RTX 4090、A100、RTX 3090、M2 Max；未见 RTX 3060 v1.5 实测。README 的 8GB 优化公告在 v1.5 发布前。 | 未证实。须单独测 v1.5，不能引用旧模型的 8GB 声明。 |
+| ACE-Step v1.5 | 官方仓库测试表包含 RTX 4090、A100、RTX 3090、M2 Max；未见 RTX 3060 v1.5 实测。README 的 8GB 优化公告在 v1.5 发布前。 | 环境已建成：`.venv-music`（transformers<4.58）+ 权重 10.03GB 校验 + 12GB 档必需的 DiT offload 环境变量（上游 #1337）；提交门槛按实测设 12288MiB 总量 / 7000MiB 空闲。**端到端出音频的真机验收仍排队等显存窗口，通过前不标记「已验证」。** |
 | MusicGen | 官方 MusicGen 模型卡提供 300M/1.5B/3.3B 规格，未以此证明 Windows 12GB 组合。 | 硬件可能性不是主要阻塞；权重 CC-BY-NC 4.0 的非商用条款是商业路线的阻塞项。 |
 
 ## Windows / 依赖现状

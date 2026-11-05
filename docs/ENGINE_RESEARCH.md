@@ -5,11 +5,11 @@
 
 ## 结论摘要
 
-| 模态 | 优先候选 | 桌面证据 | 许可证/适配结论 | 决策 |
+| 模态 | 优先候选 | 桌面证据 | 许可证/适配结论 | 决策（2026-11-05 现状标注） |
 |---|---|---|---|---|
-| 图片 | FLUX.1-schnell + Diffusers | BFL 官方代码列出 Apache-2.0 权重；Diffusers 有本地 pipeline 和 CPU offload 示例 | 适合作为首个候选；RTX 3060 的峰值显存、速度、完整 Windows 依赖组合仍未实测 | 推荐进入用户确认后的 Phase 1/3 准备 |
-| 视频 | FramePack（I2V 优先） | 官方 README 明列 Windows、RTX 30/40/50、最低 6GB；官方 Windows 包为 CUDA 12.6 / PyTorch 2.6，并称模型另需下载 30GB 以上 | 12GB 仅有项目方最低显存声明，不是本机实测；模型权重许可与稳定可编程控制接口待核验 | 有条件候选；确认许可和接口后再决定集成 |
-| 音乐 | ACE-Step v1.5 | 官方项目页提供 Windows venv 安装说明和本地运行/API 路线，2026-01-28 公告 v1.5 | README 的 8GB 优化与 3090 基准属于旧版本/旧测试，不能外推至 v1.5；v1.5 权重许可和 RTX 3060 实测未核实 | 有条件候选；暂不集成 |
+| 图片 | FLUX.1-schnell + Diffusers | BFL 官方代码列出 Apache-2.0 权重；Diffusers 有本地 pipeline 和 CPU offload 示例 | 适合作为首个候选；RTX 3060 的峰值显存、速度、完整 Windows 依赖组合仍未实测 | **已集成**：RTX 3060 真实出图 + 离线复现留证（见根 README） |
+| 视频 | FramePack（I2V 优先） | 官方 README 明列 Windows、RTX 30/40/50、最低 6GB；官方 Windows 包为 CUDA 12.6 / PyTorch 2.6，并称模型另需下载 30GB 以上 | 12GB 仅有项目方最低显存声明，不是本机实测；模型权重许可与稳定可编程控制接口待核验 | 未采用；实际接入的是 Anima（`app/engine/video/anima.py`），其权重许可属社区类，**下载与否待用户确认** |
+| 音乐 | ACE-Step v1.5 | 官方项目页提供 Windows venv 安装说明和本地运行/API 路线，2026-01-28 公告 v1.5 | README 的 8GB 优化与 3090 基准属于旧版本/旧测试，不能外推至 v1.5；v1.5 权重许可和 RTX 3060 实测未核实 | **已集成**（`.venv-music`，权重逐文件校验，12GB 档 DiT offload）；RTX 3060 端到端出音频验收仍排队，通过前不标记已验证 |
 
 这不是硬件认证或法律意见。所有“兼容”在本项目中须以目标 Windows 机器、固定环境、目标模型和可打开的实际输出文件通过测试为准。
 
