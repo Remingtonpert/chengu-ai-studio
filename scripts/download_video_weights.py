@@ -3,7 +3,7 @@
 - 强制走 hf-mirror 镜像端点：本机直连 huggingface.co 会超时（WinError 10060）。
 - snapshot_download 天然支持断点续传：中断后重跑本脚本，已完成的分片跳过、
   .incomplete 分片继续写（与音乐权重下载脚本同一策略）。
-- 目标 models/wan2.1 采用 huggingface_hub 标准缓存布局（与 models/flux-schnell
+- 目标 models/wan2.1 采用 huggingface_hub 标准缓存布局（与 models/sd-realvis
   一致：blobs + models--Wan-AI--<repo>/snapshots/<sha>），引擎侧按快照目录离线加载。
 - 跳过 assets/、examples/ 纯展示文件；保留 README/LICENSE 许可文本（随包再分发）。
 
@@ -20,6 +20,14 @@ import time
 from pathlib import Path
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
+# Windows 默认控制台代码页是 GBK，打不出中文和 emoji：不兜底的话脚本会在 print 时
+# 直接抛 UnicodeEncodeError 崩掉，用户只看到「跑不起来」。errors="replace" 保证永不因此崩。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # 被重定向、已关闭或过老的流：忽略，不影响主流程
+        pass
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 
 from huggingface_hub import snapshot_download  # noqa: E402

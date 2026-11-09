@@ -88,9 +88,28 @@ def system_prefers_dark() -> bool:
         return False
 
 
-def build_stylesheet(dark: bool) -> str:
-    """Stylesheet for the whole main window, built from MJ palette tokens."""
+# 规则 5：每个模块一套外观；规则 3：桌面端与网页端必须一致。
+# 这些色值就是两端唯一的一份，网页端写在 style.css 的 html[data-mode=...] 块里，
+# tests/test_mode_theme.py 把两边对拍钉死，谁改了另一边测试立刻红。
+# 文生图 / 图生图沿用 Midjourney 中性近白：两端都刻意不给它们独立皮肤，
+# 落到「认不出＝保持 MJ 中性配色」的兜底分支，不会冒出野色；
+# AI 音乐随 Wan/ACE-Step 回归重新上岗，恢复 SUNO 紫 #b15cf6（与网页端 L439 一致）。
+MODE_ACCENTS: dict[str, "tuple[str, str] | None"] = {
+    "agent": ("#0f9d8f", "#f2fbf9"),   # ChatGPT 风：青绿
+    "t2v": ("#e8615c", "#1a0b0a"),     # PIKA 风：影院红
+    "i2v": ("#e8615c", "#1a0b0a"),
+    "music": ("#b15cf6", "#150a1e"),   # SUNO 风：电紫
+}
+
+
+def build_stylesheet(dark: bool, mode: str | None = None) -> str:
+    """按当前模式上强调色（规则 5）；mode 为空时完全保持既有 MJ 中性配色。"""
     p = palette(dark)
+    accent = MODE_ACCENTS.get(mode or "")
+    if accent:
+        p = dict(p)
+        p["accent"], p["accent_ink"] = accent
+        p["blue"] = accent[0]
     rules = [
         # ---------------------------------------------------------------- 基底
         f"QMainWindow {{ background: {p['bg']}; color: {p['text']}; }}",
@@ -103,7 +122,8 @@ def build_stylesheet(dark: bool) -> str:
         # ------------------------------------------------------- 三栏与顶栏
         f"QFrame#sideColumn {{ background: {p['bg_soft']}; border-right: 1px solid {p['line']}; }}",
         f"QFrame#panelColumn {{ background: {p['bg_soft']}; border-left: 1px solid {p['line']}; }}",
-        f"QFrame#composerBar {{ background: {p['bg_soft']}; border-top: 1px solid {p['line']}; }}",
+        # 顶边勾一条强调色：桌面端切到视频/音乐模式时，输入区立刻带上该模块的颜色（规则 5）。
+        f"QFrame#composerBar {{ background: {p['bg_soft']}; border-top: 2px solid {p['accent']}66; }}",
         f"QFrame#topBar {{ background: {p['bg']}; border-bottom: 1px solid {p['line']}; }}",
         f"QLabel#brand {{ font-size: 15px; font-weight: 700; color: {p['text']}; }}",
         f"QLabel#brandSub {{ font-size: 10px; color: {p['text_dim']}; }}",
@@ -155,7 +175,7 @@ def build_stylesheet(dark: bool) -> str:
         f"QLabel#feedLogo {{ font-size: 34px; font-weight: 700; color: {p['line_soft']}; }}",
         f"QLabel#feedHint {{ color: {p['text_mid']}; font-size: 13px; }}",
         "QWidget#batchBlock { background: transparent; }",
-        f"QFrame#userBubble {{ background: {p['bg_card']}; border: 1px solid {p['line']};",
+        f"QLabel#userBubble {{ background: {p['bg_card']}; border: 1px solid {p['line']};",
         f" border-radius: {p['radius']}; padding: 10px 14px; }}",
         f"QLabel#bubbleText {{ font-size: 13px; color: {p['text']}; }}",
         f"QLabel#tag {{ font-size: 10px; color: {p['text_dim']}; border: 1px solid {p['line']};",

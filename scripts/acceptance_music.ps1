@@ -2,7 +2,9 @@ param(
     [string]$Base = 'http://127.0.0.1:8765',
     [int]$DurationSec = 120,
     [int]$MaxWaitMin = 120,
-    [int]$RunTimeoutMin = 90
+    [int]$RunTimeoutMin = 90,
+    [int]$MinFreeVRAMMB = 12300,
+    [int]$MinFreeRAMGB = 36
 )
 # ACE-Step 1.5 end-to-end acceptance: submit a Chinese-vocal music task through the
 # running web console, wait for the real 48kHz wav, verify it honestly.
@@ -53,9 +55,11 @@ try {
 }
 if ($Summary.steps[-1].pass -ne $true) { $Summary.overall = 'FAIL'; Save-Summary; Stop-Transcript | Out-Null; exit 1 }
 
-# Step 2: wait for VRAM/RAM window (ACE-Step needs >=12.3GB free VRAM, LLM engine must be released)
+# Step 2: wait for VRAM/RAM window. ACE-Step 1.5 needs (near-)all 12GB VRAM idle AND >=36GB free
+# system RAM; the local LLM engine holds both, so it must be released first (see below).
+# Thresholds are parameters: -MinFreeVRAMMB / -MinFreeRAMGB.
 $gpuFree = Get-GpuFree; $ramFree = Get-RamFreeGb
-$preOk = ($gpuFree -ge 12300) -and ($ramFree -ge 36)
+$preOk = ($gpuFree -ge $MinFreeVRAMMB) -and ($ramFree -ge $MinFreeRAMGB)
 $waited = 0
 Log "GPU free: ${gpuFree} MiB | RAM free: ${ramFree} GB"
 if (-not $preOk) {
@@ -65,7 +69,7 @@ if (-not $preOk) {
     while (-not $preOk -and $waited -lt $maxSec) {
         Start-Sleep -Seconds 15; $waited += 15
         $gpuFree = Get-GpuFree; $ramFree = Get-RamFreeGb
-        $preOk = ($gpuFree -ge 12300) -and ($ramFree -ge 36)
+        $preOk = ($gpuFree -ge $MinFreeVRAMMB) -and ($ramFree -ge $MinFreeRAMGB)
         if (-not $preOk -and ($waited % 60 -eq 0)) { Log "waiting... gpu_free=${gpuFree}MiB ram_free=${ramFree}GB (${waited}s/${maxSec}s)" }
     }
 }

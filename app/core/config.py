@@ -20,40 +20,82 @@ class ConfigStore:
         self.defaults: dict[str, Any] = {
             "models_dir": str(paths.models_dir),
             "output_dir": str(paths.output_dir),
-            # 真实生成引擎（FLUX）需用户确认模型下载/许可后才启用；默认关闭。
+            # 自动另存目录：留空＝只存项目内 output\；填了则每次生成完成后再复制一份
+            # 到这个目录（用户可以选本地硬盘任意位置，包括移动盘）。手动「另存为」不受它影响。
+            "auto_save_dir": "",
+            # 真实生成引擎（Wan2.1 视频）需用户确认模型下载/许可后才启用；默认关闭。
+            # 文生图 / 图生图 / AI 音乐的引擎已按「≤6GB 峰值显存 + 中英文 Prompt + 权重可商用」
+            # 三条要求下架，对应的 venv 与权重配置键一并移除（旧 config.json 里残留的键会被忽略）。
             "engines_enabled": False,
-            "image_venv_python": "",
-            # AI 音乐引擎（ACE-Step 1.5）：全部路径可配置且默认相对项目根目录，
-            # 便于整目录打包迁移到其他电脑。权重/代码仓库缺失时引擎自动不注册。
-            "music_venv_python": "",
-            "music_model_dir": str(Path(__file__).resolve().parents[2] / "models" / "ace-step-1.5"),
-            "music_repo_dir": str(Path(__file__).resolve().parents[2] / "vendor" / "ACE-Step-1.5"),
-            "music_lm_model": "acestep-5Hz-lm-1.7B",
-            "music_max_tasks_per_worker": 4,
+            # 视频引擎（Wan2.1 wan-t2v / wan-i2v）的环境与权重目录。
+            # 之前 defaults 里没有这两个键：_validate 只遍历 defaults，用户手工
+            # 写进 config.json 的 video_venv_python / video_model_dir 会在下一次
+            # save() 时被静默删掉，设置页也永远看不见它们（换机器/换盘符时无解）。
+            "video_venv_python": "",
+            "video_model_dir": str(Path(__file__).resolve().parents[2] / "models" / "wan2.1"),
             # Web 前端服务固定监听 127.0.0.1:8765（仅本机可访问）。
             "web_host": "127.0.0.1",
             "web_port": 8765,
-            # 提示词助手：优先调用本地 OpenAI 兼容大模型（默认 Ollama）；
-            # 置空或连接失败时自动退回内置模板增强。
-            "llm_endpoint": "http://127.0.0.1:11434/v1",
-            "llm_model": "qwen2.5:7b-instruct",
+            # 提示词助手 / 智能体聊天：只连本机 OpenAI 兼容大模型端点，
+            # 置空或连接失败时自动退回规则路由 + 诚实降级文案，绝不编造回复。
+            # 「AI 智能体」的大模型不再依赖 Ollama：权重（GGUF）放在项目内
+            # models\llm\gguf，推理用项目自带的 tools\llama_cpp\llama-server.exe，
+            # 由 scripts\agent_llm.ps1（或程序自己按需拉起）启动，只绑 127.0.0.1 : 11435。
+            # 用户自己装的 Ollama（11434）完全不受影响：想用它就把这里改回 11434/v1。
+            "llm_endpoint": "http://127.0.0.1:11435/v1",
+            # 智能体专用模型名：与 llama-server 的 --alias 一致（app/agent/local_server.py）。
+            # 这个名字在端点上不存在时，app/agent/llm.py 会先试同族、再按优先级挑一个，
+            # 所以换机器不会「聊天完全不能用」，只是日志里会多一条自动换模型的提示。
+            "llm_model": "qwen3:8b",
+            # 自带的 llama.cpp 服务没在跑时，是否由程序按需把它拉起来（只绑回环）。
+            # 关掉就完全手动：双击 scripts\run_agent_llm.bat 或跑 scripts\agent_llm.ps1 -Start。
+            "llm_autostart": True,
+            # 自带服务要加载的 GGUF 权重；留空 = 自动挑 models\llm\gguf 里最大的那个。
+            "llm_model_path": "",
+            # 大模型冷启动要把 6-8GB 权重搬进显存，第一次对话就可能几十秒：
+            # 90 秒的旧上限会在第一次对话时报「连不上本机大模型端点」。
+            "llm_timeout_seconds": 240,
+            # 「AI 智能体」等场景上传的参考图落盘目录（桌面端与 Web 控制台共用）。
+            "upload_dir": str(paths.data_root / "uploads"),
+            # 界面语言（桌面端持久化）：词典见 app/web/static/i18n/，zh = 简体中文源语言。
+            # 网页端把选择存在浏览器 localStorage，两端互不覆盖。
+            "ui_language": "zh",
         }
 
     # 整型配置项及其允许范围。
     _INT_RANGES: dict[str, tuple[int, int]] = {
         "web_port": (1, 65535),
-        "music_max_tasks_per_worker": (1, 50),
+        "llm_timeout_seconds": (15, 900),
     }
     # 非路径的普通字符串键（不做 Path 展开，允许留空表示"未配置"）。
-    _FREE_TEXT_KEYS = frozenset({"web_host", "llm_endpoint", "llm_model", "music_lm_model"})
+    _FREE_TEXT_KEYS = frozenset(
+        {
+            "web_host",
+            "llm_endpoint",
+            "llm_model",
+            "llm_model_path",
+            "ui_language",
+        }
+    )
     # 允许留空的字符串键。
-    _OPTIONAL_KEYS = frozenset({"image_venv_python", "llm_model", "llm_endpoint", "music_venv_python"})
+    _OPTIONAL_KEYS = frozenset(
+        {
+            "video_venv_python",
+            "llm_model",
+            "llm_endpoint",
+            "llm_model_path",
+            "auto_save_dir",
+        }
+    )
 
     def load(self) -> dict[str, Any]:
         if not self.path.exists():
             return self.defaults.copy()
         try:
-            raw: Any = json.loads(self.path.read_text(encoding="utf-8"))
+            # utf-8-sig：Windows 记事本「UTF-8」保存会写 BOM，普通 utf-8 读出来
+            # 第一个字符是 \ufeff，json.loads 直接报「Unexpected UTF-8 BOM」，
+            # 整个程序起不来（ConfigError），用户完全看不出是编码问题。
+            raw: Any = json.loads(self.path.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ConfigError(f"无法读取配置文件：{self.path}") from exc
         if not isinstance(raw, dict):

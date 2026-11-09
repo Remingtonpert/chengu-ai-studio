@@ -11,6 +11,7 @@ from collections.abc import Callable, Sequence
 from PySide6.QtWidgets import QApplication
 
 from app.core.config import ConfigStore
+from app.core.console import ensure_utf8_console
 from app.core.logging_setup import configure_logging
 from app.core.paths import AppPaths
 from app.engine_registration import register_production_engines
@@ -84,6 +85,13 @@ def create_application(
     engine_manager = EngineManager()
     register_production_engines(engine_manager, config, paths, logger)
     task_service = TaskService(paths.database_file, engine_manager)
+    # 自动另存目录（配置项 auto_save_dir）：两端共用同一份 config.json，真正执行任务的
+    # 那个进程按它复制副本，所以从桌面端还是网页端提交的任务表现一致。
+    task_service.set_auto_save_dir(str(config.get("auto_save_dir") or ""))
+    # 「工具内 output\」固定镜像：产物写进 output_dir（工具里即时显示的那一份）之后，
+    # 再复制一份到项目根下的 output\，这样不管用户把 output_dir 改到哪块盘，项目内
+    # output\ 里始终有一份；output_dir 本来就指着这里时不会重复复制（见 core/artifacts.py）。
+    task_service.set_project_output_dir(str(paths.project_output_dir))
     # 中断任务恢复与 worker 循环统一由 task_service.start() 完成，
     # 并由跨进程执行者锁保证只有「首个启动的进程」执行恢复，
     # 不会把另一个进程正在运行的任务误标为失败。
@@ -102,11 +110,18 @@ def create_application(
         lambda: logger.info("应用正常退出")
     )
     application.aboutToQuit.connect(stop_task_loop)
+    # 退出时把智能体拉起的大模型服务进程一并结束：不然 llama-server 变成孤儿，
+    # 显存一直占着，下次进来只会看到「显存不知道被谁吃了」。挂在 stop_task_loop
+    # 之后 = 生成引擎的 worker 先走、大模型进程后走，顺序可控。
+    application.aboutToQuit.connect(window.shutdown_services)
+    # 上次被强杀留下的孤儿 llama-server 在下次启动时清掉（只认自家镜像名）。
+    window.sweep_orphan_llm()
     return application, window
 
 
 def main() -> int:
     logging.raiseExceptions = False
+    ensure_utf8_console()
     application, window = create_application()
     window.show()
     return application.exec()

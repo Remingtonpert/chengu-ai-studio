@@ -33,6 +33,8 @@ class FeedArea(QScrollArea):
     upscaleRequested = Signal(str, str)
     cancelRequested = Signal(str)
     retryRequested = Signal(str, str)       # task_id, batch_id
+    # 手动「另存」：把这份产物复制一份到用户挑的位置（项目内 output\ 那份始终保留）。
+    saveRequested = Signal(str, str)        # task_id, batch_id
 
     def __init__(self, tokens: dict[str, str], parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -267,3 +269,4 @@ class FeedArea(QScrollArea):
         tile.upscaleRequested.connect(lambda tid: self.upscaleRequested.emit(tid, batch_id))
         tile.cancelRequested.connect(self.cancelRequested)
         tile.retryRequested.connect(lambda tid: self.retryRequested.emit(tid, batch_id))
+        tile.saveRequested.connect(lambda tid: self.saveRequested.emit(tid, batch_id))

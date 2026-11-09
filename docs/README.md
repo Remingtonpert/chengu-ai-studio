@@ -1,4 +1,5 @@
 # 文档索引
+> **2026-11-08 更新（读前必看）**：图像引擎已从 FLUX.1-schnell 换成 **SD1.5 精调 RealVis V5.1 + sd-vae-ft-mse + LCM-LoRA**（引擎 id `sd-realvis` / `sd-realvis-i2i`，磁盘 4.41 GB，真机显存峰值 1.88-2.09 GB）；FLUX 的权重、引擎与脚本**已全部删除**。本文中把 FLUX 当作现役模型的段落属于**历史记录**；许可与选型结论以 `LICENSES.md`、`docs\LICENSE_AUDIT.md` 文末「2026-11-08 增补」和 `README.md` 文末「FLUX 出局」一节为准。三条铁律：**可商用 / 中英文提示词 / 显存峰值 ≤6GB**。
 
 状态（2026-11-05）：Phase 1 桌面骨架与 Phase 2 任务生命周期已通过测试验收；Phase 3 真实引擎已接入——FLUX.1-schnell 已在本机 RTX 3060 离线产出真实图片（英文批次成功；中文端到端验收脚本就位、等待显存窗口执行），ACE-Step 1.5 权重逐文件校验通过（端到端验收排队中），Anima 视频权重待用户决策。当前进度真相源是根 `README.md`；模块与接口权威清单见 [MODULES.md](MODULES.md)。
 

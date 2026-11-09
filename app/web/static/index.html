@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>辰鹄AI创作中心</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=20261109c">
 </head>
 <body class="app">
 
@@ -32,7 +32,8 @@
 
   <!-- 模式切换 Tab：前端路由，后端接口按 task_type 分开 -->
   <nav class="mode-tabs" id="mode-tabs">
-    <button class="tab on" data-mode="t2i">文生图<span class="tab-badge"></span></button>
+    <button class="tab on" data-mode="agent">AI 智能体<span class="tab-badge"></span></button>
+    <button class="tab" data-mode="t2i">文生图<span class="tab-badge"></span></button>
     <button class="tab" data-mode="i2i">图生图<span class="tab-badge"></span></button>
     <button class="tab" data-mode="t2v">文生视频<span class="tab-badge"></span></button>
     <button class="tab" data-mode="i2v">图生视频<span class="tab-badge"></span></button>
@@ -42,7 +43,7 @@
   <div class="feed" id="feed">
     <div class="empty" id="feed-empty">
       <div class="empty-logo">辰鹄AI创作中心</div>
-      <p>在下方输入提示词，Enter 提交。顶部 Tab 切换业务：文生图 / 图生图 / 视频 / AI音乐。</p>
+      <p>在下方输入提示词，Enter 提交。顶部 Tab 切换业务：AI 智能体 / 文生图 / 图生图 / 视频 / AI音乐。</p>
       <p class="muted">同一会话可混排图片、视频、音频记录 · 悬停结果图显示 V（变化）/ U（放大）</p>
     </div>
   </div>
@@ -69,7 +70,7 @@
     <button class="icon-btn" id="close-settings" title="收起面板">⟩</button>
   </div>
   <div class="panel-body">
-    <section data-modes="t2i i2i t2v i2v">
+    <section data-modes="t2i i2i t2v i2v music">
       <h4>引擎</h4>
       <select id="engine-select" class="select"></select>
       <div class="engine-state-row">
@@ -78,50 +79,24 @@
       </div>
       <p class="hint" id="engine-mode-hint"></p>
     </section>
-    <section data-modes="t2i i2i">
-      <h4>宽高比</h4>
-      <div class="chips" id="aspect-chips">
-        <button class="chip on" data-w="1024" data-h="1024">1:1</button>
-        <button class="chip" data-w="896" data-h="1152">2:3</button>
-        <button class="chip" data-w="1152" data-h="896">3:2</button>
-        <button class="chip" data-w="1216" data-h="704">16:9</button>
-        <button class="chip" data-w="704" data-h="1216">9:16</button>
-        <button class="chip" data-w="512" data-h="512">512</button>
-      </div>
-      <div class="slider-row">
-        <label for="width-range">宽</label>
-        <input type="range" id="width-range" min="512" max="1408" step="8">
-        <input type="number" id="width-num" class="num" min="256" max="1536" step="8">
-      </div>
-      <div class="slider-row">
-        <label for="height-range">高</label>
-        <input type="range" id="height-range" min="512" max="1408" step="8">
-        <input type="number" id="height-num" class="num" min="256" max="1536" step="8">
-      </div>
-      <p class="hint" id="vram-hint"></p>
-    </section>
-    <section data-modes="i2i">
-      <h4>重绘强度 strength <span id="strength-label" class="muted"></span></h4>
-      <input type="range" id="strength-range" min="0.1" max="1" step="0.05">
-      <p class="hint">低（0.3–0.5）贴近垫图构图；高（0.7–1.0）大改画面。V/U 用固定强度，不受此滑块影响。</p>
-    </section>
-    <section data-modes="t2v i2v">
-      <h4>视频尺寸</h4>
+    <section data-modes="t2i i2i t2v i2v">
+      <h4>生成尺寸（480p 档像素预算）</h4>
       <div class="chips" id="aspect-chips-v">
-        <button class="chip" data-w="512" data-h="384">4:3</button>
-        <button class="chip" data-w="384" data-h="512">3:4</button>
-        <button class="chip" data-w="448" data-h="448">1:1</button>
-        <button class="chip" data-w="640" data-h="368">16:9</button>
+        <button class="chip" data-w="832" data-h="480">16:9</button>
+        <button class="chip" data-w="480" data-h="832">9:16</button>
+        <button class="chip" data-w="624" data-h="624">1:1</button>
+        <button class="chip" data-w="640" data-h="480">4:3</button>
+        <button class="chip" data-w="480" data-h="640">3:4</button>
       </div>
       <div class="slider-row">
         <label for="vwidth-range">宽</label>
-        <input type="range" id="vwidth-range" min="256" max="1024" step="16">
-        <input type="number" id="vwidth-num" class="num" min="256" max="1024" step="16">
+        <input type="range" id="vwidth-range" min="256" max="832" step="16">
+        <input type="number" id="vwidth-num" class="num" min="256" max="832" step="16">
       </div>
       <div class="slider-row">
         <label for="vheight-range">高</label>
-        <input type="range" id="vheight-range" min="256" max="1024" step="16">
-        <input type="number" id="vheight-num" class="num" min="256" max="1024" step="16">
+        <input type="range" id="vheight-range" min="256" max="832" step="16">
+        <input type="number" id="vheight-num" class="num" min="256" max="832" step="16">
       </div>
       <p class="hint" id="v-vram-hint"></p>
     </section>
@@ -135,19 +110,19 @@
       <input type="range" min="0" max="100" value="50" disabled>
       <p class="hint">Wan2.1 不暴露运动幅度参数；此控件保留为禁用占位，不改变任何默认行为。</p>
     </section>
-    <section data-modes="t2i i2i t2v i2v">
+    <section data-modes="t2i i2i t2v i2v music">
       <h4>Steps <span id="steps-label" class="muted"></span></h4>
-      <input type="range" id="steps-range" min="1" max="12" step="1">
-      <p class="hint" id="steps-hint">schnell 推荐 4 步；更多步数收益低且更慢。</p>
+      <input type="range" id="steps-range" min="1" max="50" step="1">
+      <p class="hint" id="steps-hint">Wan 图片/视频档默认 28 步；ACE-Step turbo 音乐档默认 8 步（推荐）。</p>
     </section>
-    <section data-modes="t2i i2i t2v i2v">
+    <section data-modes="t2i i2i t2v i2v music">
       <h4>Seed</h4>
       <div class="seed-row">
         <label class="switch"><input type="checkbox" id="seed-lock">固定</label>
         <input type="number" id="seed-num" class="num wide" min="0" step="1" placeholder="随机">
         <button class="btn-mini" id="seed-dice" title="随机种子">🎲</button>
       </div>
-      <p class="hint" id="seed-hint">不固定时，一次想象 = 4 个不同 seed；固定时用连续 4 个 seed。</p>
+      <p class="hint" id="seed-hint">不固定时每次随机；固定时同一 seed 可复现同一段视频/同一张图/同一首曲子。</p>
     </section>
     <section data-modes="t2i i2i t2v i2v">
       <h4>负面提示词</h4>
@@ -176,17 +151,37 @@
     </section>
     <section data-modes="music">
       <h4>音乐引擎状态</h4>
-      <p class="hint warn">已接入 ACE-Step 1.5（权重 MIT，本地离线推理，无云端 API；最低 12GB 显存）。支持 4-10 分钟带人声完整乐曲或纯器乐，输出 48kHz wav；不支持超长多轨道复杂编曲。提交前会检查显存并弹出能力边界确认；显存不足会直接拦截。</p>
+      <p class="hint warn">已接入 ACE-Step 1.5（权重 MIT，本地离线推理，无云端 API；按 6GB 显存档位设计，LM/DiT 走 CPU 卸载，峰值显存为预期值、尚未实测，验收以任务元数据 peak_vram_mb 为准）。支持带人声（中英文）完整乐曲或纯器乐，时长 10-480 秒，输出 48kHz wav；不支持超长多轨道复杂编曲。提交前会检查显存并弹出能力边界确认；显存不足会直接拦截。</p>
       <h4>BPM <span id="bpm-label" class="muted"></span></h4>
       <input type="range" id="bpm-range" min="60" max="180" step="1">
       <h4>目标时长 <span id="music-dur-label" class="muted"></span></h4>
       <input type="range" id="music-dur-range" min="30" max="480" step="30">
-      <p class="hint">12GB 显存档位实际最长约 8 分钟（480s），超出会被引擎自动截到上限，产物按真实时长为准。</p>
+      <p class="hint">合法范围 10-480 秒，超出会被引擎夹到边界，产物按真实时长为准。</p>
+      <h4>人声 / 纯器乐</h4>
+      <div class="seed-row">
+        <button class="btn-mini" id="instrumental-toggle" type="button">纯器乐（不要人声）</button>
+        <select id="vocal-lang-select" class="select">
+          <option value="zh">人声语言：中文</option>
+          <option value="en">人声语言：英文</option>
+        </select>
+      </div>
+      <p class="hint">勾选纯器乐时不生成人声；带人声时歌词由本地 LM 依风格描述自动创作，语言按上面选择（中英文）。</p>
     </section>
     <section data-modes="t2i i2i t2v i2v">
       <h4>高级参数（JSON，可选）</h4>
-      <textarea id="advanced-json" class="textarea-sm" rows="2" placeholder='{"strength": 0.6}'></textarea>
-      <p class="hint" id="advanced-hint">白名单：width height steps seed negative_prompt init_image_path strength；init_image_path 需为盘符开头的绝对路径，且指向已存在的具体图片文件（png/jpg/jpeg/webp/bmp），不能是文件夹</p>
+      <textarea id="advanced-json" class="textarea-sm" rows="2" placeholder='{"num_frames": 49}'></textarea>
+      <p class="hint" id="advanced-hint">白名单：width height steps seed negative_prompt init_image_path num_frames；init_image_path 需为盘符开头的绝对路径，且指向已存在的具体图片文件（png/jpg/jpeg/webp/bmp），不能是文件夹；num_frames 只对视频板块生效</p>
+    </section>
+    <section>
+      <h4>产物保存</h4>
+      <p class="hint">生成好的内容在本工具里即时显示，产物写在输出目录 <span id="output-dir-label" class="muted">读取中…</span>；同时固定复制一份到工具内 output 目录 <span id="project-output-label" class="muted">读取中…</span>（输出目录本来就指着它时不会重复复制）。</p>
+      <h4>自动另存到本地硬盘（可选）</h4>
+      <input type="text" id="autosave-dir" class="textarea-sm" placeholder="例如 D:\AI作品；留空＝只存上面两处">
+      <div class="engine-state-row">
+        <span id="autosave-state" class="muted">未开启自动另存</span>
+        <button class="btn-mini" id="autosave-save">保存设置</button>
+      </div>
+      <p class="hint">填了以后，每次生成完成都会再复制一份到该目录（可填移动硬盘上的绝对路径，重名自动加 -1、-2，不覆盖）。想当场挑位置：点结果上的「另存」，浏览器会弹「另存为」让你选任意位置；不支持该对话框的浏览器退回普通下载。两端共用同一份设置。</p>
     </section>
   </div>
 </aside>
@@ -211,6 +206,8 @@
 </div>
 
 <div class="toast hidden" id="toast"></div>
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=20261109c"></script>
+<script src="/static/agent.js?v=20261109c"></script>
+<script src="/static/i18n.js?v=20261109c"></script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 """桌面端 MJ 同款创作界面冒烟测试（不启动 worker 循环，绝不触碰 GPU）。
 
-验证：五模式 Tab、想象 4 连发真实落库（queued）、i2i/i2v 垫图门槛、
+验证：智能体 + 五模式共六个 Tab、想象 4 连发真实落库（queued）、i2i/i2v 垫图门槛、
 视频（Wan2.1 wan-t2v/wan-i2v）提交断言动态化：引擎已注册且显存充足时断言真实
 落库（queued, engine=wan-t2v）；引擎未注册或显存预检不足时断言诚实拒绝（不落库、不伪造）；
 retry 对 queued 任务的诚实拒绝、会话 JSON 持久化、系统功能十页导航。
@@ -64,13 +64,19 @@ def task_count() -> int:
 # ---------------------------------------------------------------- Tab 与模式
 tab_modes = [tab.mode for tab in page.tab_buttons]
 print(f"[tabs] {tab_modes}")
-if tab_modes != ["t2i", "i2i", "t2v", "i2v", "music"]:
-    failures.append(f"五模式 Tab 顺序异常：{tab_modes}")
+if tab_modes != ["agent", "t2i", "i2i", "t2v", "i2v", "music"]:
+    failures.append(f"六 Tab 顺序异常：{tab_modes}")
 for mode in tab_modes:
     page.switch_mode(mode)
+    if mode == "agent":
+        # 「AI 智能体」是独立面板：它故意不接管创作参数面板、也不把 "agent" 写进
+        # 模式设置（免得参数面板读到陌生模式），这里只要求智能体面板真的显示出来。
+        if page.agent_page is None or not page.agent_page.isVisibleTo(page):
+            failures.append("切到 agent 后智能体面板没有显示")
+        continue
     if page.panel.mode != mode or page.composer._modality is None:
         failures.append(f"切换 {mode} 后面板/composer 未跟随")
-print("[tabs] 五模式切换全部生效（参数面板可见性 + composer 占位文案）")
+print("[tabs] 六 Tab（智能体 + 五创作模式）切换全部生效")
 
 # ------------------------------------------------------- 文生图：想象 4 连发
 page.switch_mode("t2i")
@@ -84,7 +90,7 @@ if submitted != 4:
     failures.append(f"想象应排队 4 张，实际 {submitted}")
 latest = task_service.list_tasks(limit=4)
 for record in latest:
-    if record.status.value != "queued" or record.request.engine_id != "flux-schnell":
+    if record.status.value != "queued" or record.request.engine_id != "sd-realvis":
         failures.append(f"任务状态/引擎异常：{record.status.value} {record.request.engine_id}")
 seeds = {record.request.parameters.get("seed") for record in latest}
 if len(seeds) != 4 or None in seeds:

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -11,6 +12,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -38,6 +40,9 @@ class LightboxDialog(QDialog):
         self._pixmap: QPixmap | None = None
         self.setWindowTitle("生成结果 · 大图")
         self.setObjectName("lightbox")
+        # 关掉就销毁：每次打开都新建一个实例，不保留就会一直挂在父窗口下，
+        # 连带全尺寸 QPixmap 一起常驻内存。
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.resize(1080, 780)
         self.setMinimumSize(640, 480)
 
@@ -82,6 +87,18 @@ class LightboxDialog(QDialog):
         folder_button.setObjectName("btnMini")
         folder_button.clicked.connect(self._open_folder)
         actions.addWidget(folder_button)
+        save_button = QPushButton("另存为…", self)
+        save_button.setObjectName("btnMini")
+        save_button.setToolTip(
+            "复制一份到你选的位置（任意盘符、移动硬盘或网盘目录）；"
+            "项目内 output 里那份保留不动，工具里显示的就是它"
+        )
+        save_button.clicked.connect(self._save_as)
+        actions.addWidget(save_button)
+        self._save_hint = QLabel(self)
+        self._save_hint.setObjectName("metaDim")
+        self._save_hint.setTextFormat(Qt.TextFormat.PlainText)
+        actions.addWidget(self._save_hint)
         actions.addStretch(1)
         self._counter = QLabel(self)
         self._counter.setObjectName("metaDim")
@@ -120,6 +137,7 @@ class LightboxDialog(QDialog):
     def show_item(self) -> None:
         rec = self._record()
         path = self._path()
+        self._save_hint.setText("")  # 换张图就把上一次的「已另存」提示清掉
         self._pixmap = QPixmap(path) if path else QPixmap()
         if self._pixmap.isNull():
             self._image.setText("无法读取图片文件：" + path)
@@ -153,6 +171,34 @@ class LightboxDialog(QDialog):
         path = self._path()
         if path:
             open_local_file(str(Path(path).parent))
+
+    def _save_as(self) -> None:
+        r"""另存当前这张产物：复制一份到用户选的位置，原文件留在输出目录里。
+
+        网页端大图查看器的「另存」走浏览器保存框（showSaveFilePicker），这里是 Qt 版；
+        想每单自动多存一份，去「设置」页填「自动另存目录」（两端共用 config.json）。
+        """
+        raw = self._path()
+        source = Path(raw) if raw else None
+        if source is None or not source.is_file():
+            self._save_hint.setText("产物文件不在输出目录，无法另存")
+            return
+        selected, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "另存产物（可选任意盘符、移动硬盘或网盘目录）",
+            str(source),
+            f"生成产物 (*{source.suffix});;所有文件 (*)",
+        )
+        if not selected:
+            return  # 取消：什么都不改
+        target = Path(selected)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+        except OSError as exc:
+            self._save_hint.setText(f"另存失败：{exc}")
+            return
+        self._save_hint.setText(f"已另存 → {target.name}")
 
     # ------------------------------------------------------------------ 布局
     def resizeEvent(self, event) -> None:  # noqa: N802

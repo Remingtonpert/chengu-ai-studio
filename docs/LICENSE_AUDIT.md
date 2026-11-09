@@ -1,6 +1,6 @@
 # 辰鹄 AI 创作中心：许可证审计
 
-**核查日期：2026-10-11（调研快照）· 2026-11-05 增补：FLUX.1-schnell（Apache-2.0）与 ACE-Step 1.5（官方仓库 README 声明 MIT，权重经 `ACE-Step/Ace-Step1.5` 下载并逐文件校验）已实际集成进本地引擎；同日经 Hugging Face 仓库 API 复核权重仓库 license 元数据（见文末「模型许可台账」），两者均可商用、可随安装包再分发。同日视频选型收口：`Wan-AI/Wan2.1-T2V-1.3B-Diffusers`（文生视频）与 `Wan-AI/Wan2.1-VACE-1.3B-diffusers`（图生视频·首帧条件）经 HF API 实测均 **Apache-2.0（gated:false）**，已下载入包（`models/wan2.1`，两快照合计物理 44.18 GB）。Anima 视频引用已于 2026-11-05 整体移除（其真实上游为不可商用的社区许可，且代码原引用的仓库不存在），不下载、不入包。**  
+**核查日期：2026-10-11（调研快照）· 2026-11-05 增补：FLUX 集成时点；**2026-11-08 再增补：图像引擎换成 SD1.5 + RealVis V5.1（OpenRAIL-M）+ sd-vae-ft-mse（MIT）+ LCM-LoRA（OpenRAIL++），FLUX.1-schnell 已整套删除**（见文末「2026-11-08 增补」）。原文中 2026-11-05 增补的 FLUX.1-schnell（Apache-2.0）与 ACE-Step 1.5（官方仓库 README 声明 MIT，权重经 `ACE-Step/Ace-Step1.5` 下载并逐文件校验）已实际集成进本地引擎；同日经 Hugging Face 仓库 API 复核权重仓库 license 元数据（见文末「模型许可台账」），两者均可商用、可随安装包再分发。同日视频选型收口：`Wan-AI/Wan2.1-T2V-1.3B-Diffusers`（文生视频）与 `Wan-AI/Wan2.1-VACE-1.3B-diffusers`（图生视频·首帧条件）经 HF API 实测均 **Apache-2.0（gated:false）**，已下载入包（`models/wan2.1`，两快照合计物理 44.18 GB）。Anima 视频引用已于 2026-11-05 整体移除（其真实上游为不可商用的社区许可，且代码原引用的仓库不存在），不下载、不入包。**  
 **范围：Phase 0 候选推理代码、模型权重及当前依赖声明。不是法律意见，也不是完整 SBOM。**
 
 ## 核心结论
@@ -56,9 +56,9 @@
 3. 按最终安装锁文件生成软件 SBOM、模型清单及 `THIRD_PARTY_NOTICES.md`。
 4. 审核商业用途、再分发和目标地区限制；需要时由专业法律顾问确认。
 
-## 2026-11-05 集成后增补
+## 2026-11-05 集成后增补（历史：其中的 FLUX.1-schnell 已于 2026-11-08 删除，权重与代码均不在仓库/安装包内）
 
-- FLUX.1-schnell：权重快照 23 文件 / 33.73 GB 已逐文件 SHA-256 校验并锁定，仅本机推理使用，不随仓库分发（`models/` 在 `.gitignore`）；Apache-2.0 归属文本随快照保留。
+- （历史）FLUX.1-schnell：权重快照 23 文件 / 33.73 GB 曾逐文件 SHA-256 校验并锁定；**2026-11-08 因显存铁律（峰值 ≤6GB）整套删除**，磁盘释放 31.41 GB，仅本机推理使用，不随仓库分发（`models/` 在 `.gitignore`）；Apache-2.0 归属文本随快照保留。
 - ACE-Step 1.5：官方代码仓库声明 MIT；四文件权重已逐文件校验（`.gitignore` 排除，不随 git 仓库分发；随便携安装包分发）。HF 权重仓库 license 元数据已于 2026-11-05 经 HF 仓库 API 复核为 **MIT**，商用/再分发结论按台账执行。下载残留 `.cache` 目录（约 3.67GB，全部为 `.incomplete` 残片与 metadata，无 snapshots）已于 2026-11-05 删除，删除后四个 safetensors 头部结构与张量清单复核完好。
 - Anima 视频：已于 2026-11-05 **整体移除**（代码、权重引用、许可标注、安装包条目全部删除）。移除依据：① 代码原引用的 `moovenio/Anima_2B_model` 与 `mit-han-lab/dc-anime-tiny` 仓库经 HF/镜像 API 查询均不存在（404）；② 本机 diffusers 0.41.0 无 `AnimaPipeline` 符号；③ 真实上游 `circlestone-labs/Anima` 为**文生图**模型且许可证为 `circlestone-labs-non-commercial-license`（非商业），不符合本项目可商用要求。因此不下载、不入包；视频模态在界面诚实显示「暂无可用本地视频引擎 · 调研中」，不提交任务、不伪造输出。
 - 依赖清点：主 `.venv`（PySide6）、`.venv-image`（torch cu130/diffusers/transformers 5.x）、`.venv-music`（transformers<4.58）三环境已实际建立；正式 SBOM 与 `THIRD_PARTY_NOTICES.md` 仍未生成，属发布前必做项（见上节 3）。
@@ -70,7 +70,11 @@
 
 | 模型/组件 | 用途 | 来源仓库 | 大小（本机实测） | 许可（API 实测） | 商用 | 入便携包 |
 |---|---|---|---|---|---|---|
-| FLUX.1-schnell | 文生图 / 图生图（唯一图像引擎） | `black-forest-labs/FLUX.1-schnell` | 23 文件 / 33.73 GB，逐文件 SHA-256 校验 | Apache-2.0（gated:auto，经镜像取已校验快照） | ✅ | ✅ `models/flux-schnell` |
+| RealVis V5.1（SD1.5 精调） | 文生图 / 图生图（唯一图像引擎） | `SG161222/Realistic_Vision_V5.1_noVAE` | 3.97 GB（快照 `1e9f017a…`） | OpenRAIL-M（HF 元数据 `creativeml-openrail-m`） | ✅ | ✅（须附 RAIL-M 使用限制） |
+| sd-vae-ft-mse | 图像 VAE（RealVis 为 noVAE 版） | `stabilityai/sd-vae-ft-mse` | 0.31 GB | MIT | ✅ | ✅ |
+| LCM-LoRA（SD1.5） | 4-8 步加速 | `latent-consistency/lcm-lora-sdv1-5` | 0.13 GB | OpenRAIL++ | ✅ | ✅ |
+| Qwen3-8B Q4_K_M GGUF | AI 智能体本地对话 | `Qwen/Qwen3-8B` 的 GGUF 量化 | 4.68 GB | Apache-2.0 | ✅ | ✅（模型卡文本待补进 `models/llm/gguf/`） |
+| llama.cpp | 智能体推理运行时 | `ggml-org/llama.cpp` | `tools/llama_cpp` | MIT | ✅ | ✅（仓库内含 LICENSE） |
 | ACE-Step 1.5 代码 | AI 音乐引擎 | GitHub `ace-step/ACE-Step-1.5`（`vendor/ACE-Step-1.5`） | 仓库快照 | MIT | ✅ | ✅ |
 | ACE-Step 1.5 权重 | AI 音乐 | `ACE-Step/Ace-Step1.5` | 4 个 safetensors，9.40 GB（清理 `.cache` 残片后），逐文件校验 | MIT（gated:false） | ✅ | ✅ `models/ace-step-1.5` |
 | Qwen3-Embedding-0.6B | 音乐管线文本嵌入组件 | `Qwen/Qwen3-Embedding-0.6B` | 随音乐权重目录 | Apache-2.0 | ✅ | ✅ |
@@ -78,5 +82,39 @@
 | Wan2.1-VACE-1.3B-diffusers | 图生视频·首帧条件（引擎 `wan-i2v`） | `Wan-AI/Wan2.1-VACE-1.3B-diffusers` | 同一缓存根（text_encoder 10.58GB，VAE 与 T2V 共享 blob；两仓库合计物理 44.18 GB） | Apache-2.0（gated:false） | ✅ | ✅ 同上 |
 | ~~Anima（已移除）~~ | ~~视频~~ | `circlestone-labs/Anima`（真实上游） | 不下载 | `circlestone-labs-non-commercial-license`（**非商业**） | ❌ | ❌ 不入包 |
 
-- FLUX.1-schnell 快照内含 Apache-2.0 LICENSE 文本，再分发时随目录保留，满足 Apache 归属义务。
+- （历史）FLUX.1-schnell 快照内含 Apache-2.0 LICENSE 文本；该模型已于 2026-11-08 删除，相关归属义务不再适用。
 - 安装包内四个 venv（`.venv`/`.venv-image`/`.venv-video`/`.venv-music`）与 runtime 的第三方 Python 包许可仍未逐包清点：正式 SBOM 与 `THIRD_PARTY_NOTICES.md` 属发布前必做项（见上节），本机自用与评测演示不受影响。
+
+---
+
+## 2026-11-08 增补：图像引擎换件后的许可与实测
+
+**换件原因（不是许可问题，是显存铁律）**：用户要求「所有大模型可商用、支持中英文提示词、运行显存峰值不超过 6GB」。
+FLUX.1-schnell 权重 23.7 GB（磁盘 31.41 GB），FP8 仍需 12 GB 以上显存，与本机其它程序共存时必然爆显存，故整套删除。
+
+**新选三件套（许可标签经 hf-mirror 的 HF API 读取仓库元数据实测）**：
+
+| 组件 | 仓库 | 许可标签 | 商用 | 本机实测 |
+|---|---|---|---|---|
+| RealVis V5.1（SD1.5 精调，noVAE） | `SG161222/Realistic_Vision_V5.1_noVAE` | `creativeml-openrail-m` | ✅ 允许商用与再分发 | 3.97 GB，快照 `1e9f017a7b1e…` |
+| SD1.5 VAE | `stabilityai/sd-vae-ft-mse` | `mit` | ✅ | 0.31 GB，快照 `31f26fdeee13…` |
+| LCM-LoRA（4-8 步加速） | `latent-consistency/lcm-lora-sdv1-5` | `openrail++` | ✅ | 0.13 GB，快照 `cf2fced511db…` |
+
+**OpenRAIL-M / OpenRAIL++ 的义务（与 Apache/MIT 不同，必须写清）**：这两类许可允许商用与再分发，但附带
+**使用限制清单**（不得用于违法犯罪、人身伤害、欺诈、监控追踪、伪造身份、色情未成年人等），并要求再分发时
+把许可全文与使用限制一并传递、下游不得移除。本项目在文档与界面提示中保留该义务；`LICENSES.md` 已列明。
+
+**证据与缺口（诚实记录）**：
+- 三个快照目录里**没有 LICENSE 文件**（只有 README 模型卡与 `model_index.json`），说明上游仓库本身只在模型卡中声明许可；
+  因此随安装包再分发前需自行附上 OpenRAIL-M / OpenRAIL++ 全文（已列入未完成项，联网后从上游仓库取回即可）。
+- `models\llm\gguf\Qwen3-8B-Q4_K_M.gguf`（4.68 GB，Apache-2.0）旁边同样没有 LICENSE/模型卡文本，正式对外发布前补齐。
+- `tools\llama_cpp` 内含 LICENSE 文本（llama.cpp 为 MIT；另有 `LICENSE-LLVM-OpenMP`），robocopy 打包原样携带。
+- **Real-ESRGAN 等超分模型明确排除**：官方权重标注仅供非商业研究用途，与可商用铁律冲突；所以真 1080p 走
+  「SD1.5 底图 + 512×512 分块重绘」，只用已在台账内的 SD1.5 权重。
+
+**显存与产物实测（支撑「峰值 ≤6GB」结论）**：文生图 512×512 峰值 1884 MB / 6.1 s；真 1080p（底图 896×512 + 15 块重绘）
+峰值 2051 MB / 58.5 s；图生图 768×512 峰值 2094 MB / 18.6 s；文生视频 Wan2.1-1.3B（512×384、49 帧、12 步、逐层卸载）
+峰值 2021 MB / 378.7 s。四项均远低于 6 GB。
+
+**中英文提示词**：SD1.5 的 CLIP 无中日韩词表，故新增 `app\engine\prompt_bilingual.py`（纯标准库、离线）做关键词桥接；
+Wan2.1（UMT5）与 ACE-Step 原生多语，不需要桥接。桥接不改变许可义务，也不引入任何新模型。

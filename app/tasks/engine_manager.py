@@ -120,6 +120,31 @@ class EngineManager:
                         engine_id, "stopped", "引擎已停止"
                     )
 
+    async def release_idle_engines(self, keep_engine_id: str | None) -> tuple[str, ...]:
+        """释放除 keep_engine_id 之外所有**还持有 worker 子进程**的引擎。
+
+        keep_engine_id 传 None＝一个都不留：空闲十分钟的收割循环与「显存不够先让路」
+        这两处用它，把本进程所有还挂着的引擎 worker 全停掉、显存当场交还。
+        生成队列严格串行（执行者锁保证同一时刻只有一个任务在跑），所以其它引擎
+        的 worker 只可能是上一个任务留下的「热缓存」。单张 12GB 卡上图像引擎常驻
+        约 7GB 显存：不释放的话 ACE-Step 的 health_check 会因为空闲显存不足
+        6000MB 直接拒绝启动，Wan2.1 更是 CUDA OOM——五类功能各自能跑、换着跑就
+        跑不动。测试适配器没有 process_id，不会被这里动到。
+        """
+        released: list[str] = []
+        for engine_id in tuple(self._adapters):
+            if engine_id == keep_engine_id:
+                continue
+            adapter = self._adapters.get(engine_id)
+            if adapter is None or getattr(adapter, "process_id", None) is None:
+                continue
+            try:
+                await self.stop_engine(engine_id)
+            except Exception:  # noqa: BLE001 - 释放失败不否决本次任务
+                continue
+            released.append(engine_id)
+        return tuple(released)
+
     async def restart_engine(self, engine_id: str) -> EngineAdapter:
         await self.stop_engine(engine_id)
         return await self.start_engine(engine_id)

@@ -1,4 +1,5 @@
 # 模块清单与接口文档（docs/MODULES.md）
+> **2026-11-08 更新（读前必看）**：图像引擎已从 FLUX.1-schnell 换成 **SD1.5 精调 RealVis V5.1 + sd-vae-ft-mse + LCM-LoRA**（引擎 id `sd-realvis` / `sd-realvis-i2i`，磁盘 4.41 GB，真机显存峰值 1.88-2.09 GB）；FLUX 的权重、引擎代码与专用脚本**已全部删除**。本文中把 FLUX 当作现役模型的段落属于**历史记录**；许可与选型结论以 `LICENSES.md`、`docs\LICENSE_AUDIT.md` 文末「2026-11-08 增补」和 `README.md` 文末「FLUX 出局」一节为准。三条铁律：**可商用 / 中英文提示词 / 显存峰值 ≤6GB**。
 
 > 对应 README「模块化」约束：桌面端（PySide6）与 Web 控制台**共用同一套服务层与引擎 worker**，
 > 本文档列出每个可独立复用模块的路径、职责与公开接口。以当前代码为准（2026-11-05）。

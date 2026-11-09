@@ -56,11 +56,26 @@ class AppPaths:
 
     @property
     def models_dir(self) -> Path:
-        return self.data_root / "Models"
+        # 权重目录默认落在项目根（便携包则是包根）下的 models\，与
+        # app/engine_registration.py 里图像 / 视频 / 音乐引擎的默认权重路径
+        # 同源。此前默认是 <data_root>\Models，而权重实际一直放在项目根 models\：
+        # 没有 config.json 的全新环境第一次点「文生图」就会报权重目录不存在，
+        # 必须手工往 config.json 里补 models_dir 才能跑起来。
+        return Path(__file__).resolve().parents[2] / "models"
 
     @property
     def output_dir(self) -> Path:
         return self.data_root / "Output"
+
+    @property
+    def project_output_dir(self) -> Path:
+        r"""「工具内 output\」：项目根（便携包则是代码包根）下的 output 目录。
+
+        用户要求产物除了工具里即时显示，还要固定存一份到项目内 output\，不管
+        output_dir 被改到哪块盘。与 models_dir 同源，用代码所在位置定位，整目录
+        复制到别的电脑后自动跟随新位置（不写死绝对路径）。
+        """
+        return Path(__file__).resolve().parents[2] / "output"
 
     def prepare_app_home(self) -> None:
         self.app_home.mkdir(parents=True, exist_ok=True)

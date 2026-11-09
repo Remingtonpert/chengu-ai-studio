@@ -1,4 +1,5 @@
 # 辰鹄 AI 创作中心架构提案
+> **2026-11-08 更新（读前必看）**：图像引擎已从 FLUX.1-schnell 换成 **SD1.5 精调 RealVis V5.1 + sd-vae-ft-mse + LCM-LoRA**（引擎 id `sd-realvis` / `sd-realvis-i2i`，磁盘 4.41 GB，真机显存峰值 1.88-2.09 GB）；FLUX 的权重、引擎代码与专用脚本**已全部删除**。本文中把 FLUX 当作现役模型的段落属于**历史记录**；许可与选型结论以 `LICENSES.md`、`docs\LICENSE_AUDIT.md` 文末「2026-11-08 增补」和 `README.md` 文末「FLUX 出局」一节为准。三条铁律：**可商用 / 中英文提示词 / 显存峰值 ≤6GB**。
 
 **状态：Phase 1 桌面骨架、Phase 2 任务服务已完成验收；Phase 3 真实引擎已接入（FLUX 本机真实出图、ACE-Step 权重就绪待端到端验收、Anima 权重待用户决策）。** 本文区分已实现服务与待后续阶段完成的推理能力。
 

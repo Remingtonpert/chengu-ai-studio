@@ -3,7 +3,10 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any, Union
 import asyncio
-import torch
+
+# 注意：这里不能 import torch。基类被桌面端 .venv（没有 torch）与 tests 引用，
+# 具体的 torch/diffusers 只出现在 app/engine/image|video 下的引擎实现里，由各自
+# 的 venv（.venv-image / .venv-video）加载。
 
 
 class AIGenerationEngine(ABC):

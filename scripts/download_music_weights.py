@@ -15,6 +15,14 @@ import sys
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
+# Windows 默认控制台代码页是 GBK，打不出中文和 emoji：不兜底的话脚本会在 print 时
+# 直接抛 UnicodeEncodeError 崩掉，用户只看到「跑不起来」。errors="replace" 保证永不因此崩。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # 被重定向、已关闭或过老的流：忽略，不影响主流程
+        pass
+
 from huggingface_hub import snapshot_download  # noqa: E402
 
 REPO_ID = "ACE-Step/Ace-Step1.5"

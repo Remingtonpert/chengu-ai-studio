@@ -1,4 +1,4 @@
-# 辰鹄AI创作中心 · 一键便携打包脚本
+﻿# 辰鹄AI创作中心 · 一键便携打包脚本
 #
 # 产出 dist\ChenguAIStudio_Portable\ 完整目录包：应用代码 + 四个虚拟环境
 # （.venv / .venv-image / .venv-music / .venv-video）+ 包内自带 CPython 运行时 + 全部已就位
@@ -6,8 +6,9 @@
 # NVIDIA 显卡的 Windows 电脑后，双击「启动辰鹄.bat」即可离线运行（首次启动
 # 自动做路径自适应与硬件分级，全程不联网）。
 #
-# 用法（项目根目录执行；整包含权重约 110GB（FLUX≈11.9GB + ACE-Step≈17GB +
-# Wan2.1≈44GB + 四个 venv/运行时），预留 ≥140GB 磁盘空间）：
+# 用法（项目根目录执行；整包含权重约 116GB（FLUX≈11.9GB + ACE-Step≈17GB +
+# Wan2.1≈44GB + llama.cpp≈0.73GB + Qwen3-8B GGUF≈5.03GB + 四个 venv/运行时），
+# 预留 ≥150GB 磁盘空间）：
 #   pwsh -File scripts\build_portable.ps1                  # 完整打包
 #   pwsh -File scripts\build_portable.ps1 -SkipModels      # 调试用：跳过权重复制
 #   pwsh -File scripts\build_portable.ps1 -SkipVenvs       # 调试用：跳过虚拟环境复制
@@ -38,6 +39,9 @@ New-Item -ItemType Directory -Force -Path $dist | Out-Null
 RC (Join-Path $root 'app') (Join-Path $dist 'app')
 RC (Join-Path $root 'scripts') (Join-Path $dist 'scripts')
 RC (Join-Path $root 'vendor\ACE-Step-1.5') (Join-Path $dist 'vendor\ACE-Step-1.5')
+# 「AI 智能体」自带的大模型推理程序（llama.cpp 官方 CUDA 构建，全部在项目内，不依赖 Ollama）。
+# 少了这一份，目标机上智能体就只有问答界面、没有能跑的模型服务。
+RC (Join-Path $root 'tools\llama_cpp') (Join-Path $dist 'tools\llama_cpp')
 foreach ($f in 'README.md', 'LICENSES.md', 'pytest.ini', 'requirements.txt', 'requirements-dev.txt') {
     Copy-Item (Join-Path $root $f) (Join-Path $dist $f) -Force
 }
@@ -49,6 +53,8 @@ Write-Host "== 包内运行时：$basePy =="
 RC $basePy (Join-Path $dist 'runtime\python311')
 
 # 3) 四个虚拟环境（.venv 桌面/Web 主环境；.venv-image 图像 FLUX；.venv-video 视频 Wan2.1；.venv-music 音乐）
+#    .venv 里已装好 python-docx / openpyxl / python-pptx（智能体「做 Word/Excel/PPT」用的三个纯离线
+#    写库），整份 venv 一起带走，目标机上直接能用，不需要用户 pip install，也不会去联网装东西。
 if (-not $SkipVenvs) {
     foreach ($v in '.venv', '.venv-image', '.venv-music', '.venv-video') {
         RC (Join-Path $root $v) (Join-Path $dist $v)
@@ -57,7 +63,14 @@ if (-not $SkipVenvs) {
 
 # 4) 模型权重（已下载多少带多少；缺的模块启动后对应引擎自动不注册）
 if (-not $SkipModels) {
-    $modelDirs = @('models\flux-schnell', 'models\ace-step-1.5', 'models\wan2.1')
+    $modelDirs = @(
+        'models\sd-realvis',
+        'models\sd-vae-ft-mse',
+        'models\lcm-lora-sd15',
+        'models\ace-step-1.5',
+        'models\wan2.1',
+        'models\llm\gguf'   # 智能体的 Qwen3-8B GGUF（5.03GB）：缺了它智能体就写不了文案、也写不了文档
+    )
     foreach ($m in $modelDirs) {
         $p = Join-Path $root $m
         if (Test-Path $p) { RC $p (Join-Path $dist $m) } else { Write-Warning "权重缺失（该模块引擎将不注册）：$m" }

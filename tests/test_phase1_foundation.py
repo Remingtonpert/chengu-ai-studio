@@ -2,6 +2,7 @@
 
 import sqlite3
 import logging
+from pathlib import Path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
@@ -21,7 +22,10 @@ def test_config_defaults_and_round_trip(tmp_path):
     store = ConfigStore(paths)
 
     defaults = store.load()
-    assert defaults["models_dir"] == str(tmp_path / "data" / "Models")
+    # 权重目录默认与代码同目录树（项目根 / 便携包根的 models\），
+    # 不跟随 data_root：engine_registration 的 FLUX/Wan/ACE-Step 默认权重路径同源。
+    project_root = Path(__file__).resolve().parents[1]
+    assert defaults["models_dir"] == str(project_root / "models")
     assert defaults["output_dir"] == str(tmp_path / "data" / "Output")
 
     changed = {
@@ -97,6 +101,10 @@ def test_main_window_creation_and_system_navigation(tmp_path, monkeypatch):
         assert not window.param_panel.isVisibleTo(window)
     window._show_creation()
     assert window.stack.currentWidget() is window.creation
+    # 首屏默认落在「AI 智能体」（六板块排第一）：参数面板此时让位给智能体页；
+    # 切到任一生成模式后参数面板才回来。
+    assert not window.param_panel.isVisibleTo(window)
+    window.creation.switch_mode("t2v")
     assert window.param_panel.isVisibleTo(window)
 
     # 会话 CRUD（非交互部分）：新建 → 激活 → 持久化

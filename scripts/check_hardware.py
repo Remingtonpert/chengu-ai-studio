@@ -27,6 +27,14 @@ import sys
 import time
 from pathlib import Path
 
+# Windows 默认控制台代码页是 GBK，打不出中文和 emoji：不兜底的话脚本会在 print 时
+# 直接抛 UnicodeEncodeError 崩掉，用户只看到「跑不起来」。errors="replace" 保证永不因此崩。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # 被重定向、已关闭或过老的流：忽略，不影响主流程
+        pass
+
 VRAM_FULL_MIN_MB = 12288
 VRAM_MIN_WORKABLE_MB = 6144
 RAM_FULL_MIN_MB = 60 * 1024   # 64GB 档（实际可用略低，取 60GB 兼容）

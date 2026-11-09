@@ -18,9 +18,14 @@ ACE-Step/Ace-Step1.5），本地离线推理，绝不访问任何云端 API。
                                           次生成后原生崩溃，主动轮换进程规避）
     CHENGUAI_OUTPUT_DIR                   生成结果输出目录
 
-能力边界（12GB 显存档位，官方 GPU_COMPATIBILITY Tier5）：
+能力边界（2026-11-09 起按 6GB 显存档位运行）：
     - 支持带人声完整乐曲（人声+器乐）与纯器乐；BPM 30-300、时长 10-480 秒可显式指定。
-    - 最低要求 12GB 显存；不支持超长多轨道复杂编曲；带 LM 的时长上限 8 分钟，
+    - DiT 与 LM 的权重全部留在物理内存、按层换入显存（ACESTEP_OFFLOAD_TO_CPU /
+      ACESTEP_OFFLOAD_DIT_TO_CPU 强制开启），与视频引擎同一套「逐层换入」策略；
+      整机显存门槛 6GB，生成前还要求空闲显存不少于 6GB，不够就诚实拒绝、不硬扛 OOM。
+      注意：目标峰值 <6GB 是按 offload 策略推出的**预期值，尚未真机实测**；
+      每次生成都会把真实 peak_vram_mb 记进任务元数据，验收时用它核对。
+    - 不支持超长多轨道复杂编曲；带 LM 的时长上限 8 分钟，
       超出会被引擎内部截短——worker 读回真实时长而不是假设。
 """
 
@@ -28,15 +33,22 @@ from __future__ import annotations
 
 import asyncio
 import os
-import threading
 from pathlib import Path
 from typing import Any, Dict, FrozenSet, Optional
 
+from app.engine.memprobe import floor_mb_or, ram_gate_message, ram_gate_ok, read_physical_ram
 from app.tasks.models import TaskRequest, TaskResult
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-MUSIC_MIN_VRAM_MB = 12_288  # 硬性门槛：低于 12GB 显存无法运行 ACE-Step 1.5
+MUSIC_MIN_VRAM_MB = 6_144  # 整机显存门槛：6GB 档（DiT/LM 权重 CPU 换入，逐层上卡）
+MUSIC_MIN_FREE_RAM_MB = 14_336  # 加载前要求的空闲物理内存：9.40GB 权重 + DiT/LM 运行期缓冲
+                               # （显存省下来的代价就是权重常驻内存，这道门槛不能降）
+
+
+def _music_min_free_ram_mb() -> int:
+    """空闲物理内存门槛；排障时可用 CHENGUAI_MUSIC_MIN_FREE_RAM_MB 临时压低。"""
+    return floor_mb_or(os.environ.get("CHENGUAI_MUSIC_MIN_FREE_RAM_MB"), MUSIC_MIN_FREE_RAM_MB)
 MUSIC_MAX_DURATION_SEC = 480.0  # 带 LM 的 12GB 档位官方上限（8 分钟）
 MUSIC_MIN_DURATION_SEC = 10.0
 
@@ -109,6 +121,9 @@ class MusicTaskAdapter:
         self._output_dir = os.environ.get("CHENGUAI_OUTPUT_DIR", "./output")
         self._handlers: Optional[tuple[Any, Any]] = None
         self._gen_count = 0
+        # 由 app.tasks.process_worker 的 IPC 宿主读取：True 表示「本次响应写完后
+        # 进程应优雅退出」，用于达到轮换阈值时的自我更换。
+        self.should_recycle = False
 
     # ------------------------------------------------------------------ 生命周期
 
@@ -155,19 +170,29 @@ class MusicTaskAdapter:
         except Exception as exc:  # noqa: BLE001
             return False, f".venv-music 环境缺少 torch：{exc}"
         if not torch.cuda.is_available():
-            return False, "worker 环境没有可用的 CUDA 设备（AI音乐需要 NVIDIA GPU，最低 12GB 显存）"
+            return False, "worker 环境没有可用的 CUDA 设备（AI音乐需要 NVIDIA GPU，最低 6GB 显存档位）"
         props = torch.cuda.get_device_properties(0)
         total_mb = int(props.total_memory / (1024 * 1024))
         if total_mb < MUSIC_MIN_VRAM_MB:
             return False, (
-                f"显卡 {props.name} 显存 {total_mb} MB，低于 ACE-Step 1.5 最低要求 "
-                f"{MUSIC_MIN_VRAM_MB} MB（12GB），AI音乐不可用"
+                f"显卡 {props.name} 显存 {total_mb} MB，低于 ACE-Step 1.5 的 6GB 档门槛 "
+                f"{MUSIC_MIN_VRAM_MB} MB，AI音乐不可用"
             )
         free_mb, _total = torch.cuda.mem_get_info()
-        if int(free_mb / (1024 * 1024)) < 6_000:
+        if int(free_mb / (1024 * 1024)) < MUSIC_MIN_VRAM_MB:
             return False, (
-                f"当前空闲显存仅 {int(free_mb / (1024*1024))} MB，GPU 被其他程序占满；"
-                "请先释放显存（如关闭本机 LLM 引擎）再提交音乐任务"
+                f"当前空闲显存仅 {int(free_mb / (1024*1024))} MB，不足 6GB 档运行预算；"
+                "请先释放显存（如关闭本机 LLM 引擎或第三方占用程序）再提交音乐任务"
+            )
+        # 权重（DiT + 1.7B LM，合计 9.40GB）要先读进物理内存；内存不够时进程会被系统
+        # 直接杀掉、十几分钟之后连错误都拿不到，所以在 health_check 里就拦住。
+        ram = read_physical_ram()
+        if not ram_gate_ok(ram, _music_min_free_ram_mb()):
+            return False, ram_gate_message(
+                "ACE-Step 1.5 音乐引擎",
+                _music_min_free_ram_mb(),
+                ram,
+                "9.40GB 权重（DiT + acestep-5Hz-lm-1.7B）要先读进物理内存，再加运行期缓冲",
             )
         missing = [str(p) for p in _expected_weight_files(self._env) if not p.is_file()]
         if missing:
@@ -190,6 +215,23 @@ class MusicTaskAdapter:
             raise ValueError("音乐风格描述（caption）不能为空")
         if len(request.prompt) > 500:
             raise ValueError("风格描述过长（上限 500 字符），请精简或拆段")
+        # 孤立代理码位（U+D800–U+DFFF）是进程间传输编码错乱留下的坏字符：它会一路
+        # 穿到 ACE-Step 的 tokenizer，在十几分钟生成之后才炸，报错还是
+        # 「TextEncodeInput must be …」这种看不出根因的信息。在校验阶段就拒绝。
+        from app.engine.prompt_utils import contains_lone_surrogate
+
+        candidates: list[tuple[str, object]] = [("风格描述", request.prompt)]
+        candidates += [
+            (f"参数 {key}", value)
+            for key, value in (request.parameters or {}).items()
+            if isinstance(value, str)
+        ]
+        bad_fields = [name for name, value in candidates if contains_lone_surrogate(value)]
+        if bad_fields:
+            raise ValueError(
+                f"{'、'.join(bad_fields)} 含有无法编码的坏字符（通常是进程间传输编码错乱造成）。"
+                "请清空后重新输入中文描述再提交；由脚本提交时请确认按 UTF-8 传参。"
+            )
         params = request.parameters or {}
         unknown = set(params) - _ALLOWED_PARAMS
         if unknown:
@@ -257,6 +299,18 @@ class MusicTaskAdapter:
 
         audio_path = str(result.audios[0]["path"])
 
+        # 真实显存峰值入账：6GB 档是按 offload 策略推出的目标峰值（未实测），
+        # 每次生成都把实测值写进元数据，验收/排障直接看这个数，不用猜。
+        peak_vram_mb: Optional[int] = None
+        try:
+            import torch as _torch
+
+            if _torch.cuda.is_available():
+                peak_vram_mb = round(_torch.cuda.max_memory_allocated() / (1024 * 1024))
+                _torch.cuda.reset_peak_memory_stats()
+        except Exception:  # noqa: BLE001 - 记账失败不影响任务成功
+            pass
+
         actual_duration: Optional[float] = None
         try:
             import soundfile as sf
@@ -269,10 +323,17 @@ class MusicTaskAdapter:
         self._gen_count += 1
         max_tasks = self._env["max_tasks"]
         if self._gen_count >= max_tasks:
-            # 达到轮换阈值：本次响应已由 IPC 宿主写出，稍后在空闲期退出。
-            # 下一个任务到来时 ProcessEngineAdapter 会检测到进程退出并透明重启，
-            # 重新加载权重（约 1-2 分钟），以此规避上游 #1338 的连续生成崩溃。
-            threading.Timer(2.0, lambda: os._exit(0)).start()
+            # 达到轮换阈值：不自杀，只挂一个「本轮响应写完后退出」的标记。
+            # app.tasks.process_worker 的 IPC 宿主在把本次响应刷到 stdout 之后
+            # 检查 should_recycle 并正常退出进程；下一个任务到来时
+            # ProcessEngineAdapter 会检测到进程退出并透明重启，重新加载权重
+            # （约 1-2 分钟），以此规避上游 #1338 的连续生成崩溃。
+            #
+            # 这里绝不能用 threading.Timer(2.0, os._exit)：计时器在「响应写出后、
+            # 下一请求已到达」的窗口里同样会触发，而那个时刻 worker 正在生成下一
+            # 首曲子——max_tasks=4 时第 5 首会在 2 秒后连同权重加载一起被杀掉，
+            # 表现为「第 5 次生成必失败」。
+            self.should_recycle = True
 
         return TaskResult(
             output_files=(audio_path,),
@@ -285,6 +346,7 @@ class MusicTaskAdapter:
                 "duration_sec": actual_duration if actual_duration is not None else duration,
                 "instrumental": instrumental,
                 "sample_rate": 48000,
+                "peak_vram_mb": peak_vram_mb,
                 "worker_generations_served": self._gen_count,
             },
         )

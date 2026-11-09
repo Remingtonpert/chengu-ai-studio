@@ -14,3 +14,5 @@ output/
 models/
 dist/
 .tmp_shots/
+.pytest_tmp/
+tools/

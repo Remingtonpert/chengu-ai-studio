@@ -86,7 +86,7 @@ if not missing:
     demo = task_service.submit_task(
         TaskRequest(
             task_type="image",
-            engine_id="flux-schnell",
+            engine_id="sd-realvis",
             prompt="骨架屏演示任务（保持排队）",
             parameters={"width": 1024, "height": 1024, "steps": 4, "seed": 7},
         )

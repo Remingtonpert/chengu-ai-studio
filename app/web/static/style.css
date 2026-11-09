@@ -421,3 +421,64 @@ a.vu { text-decoration: none; display: inline-flex; align-items: center; }
 ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; }
 ::-webkit-scrollbar-thumb:hover { background: #2c3038; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ------------------------------------------------------------------ 模式专属皮肤（规则 5）
+   四个模块四套外观：AI 智能体＝ChatGPT 风、文生图/图生图＝Midjourney 风（沿用近白强调）、
+   文生视频/图生视频＝PIKA 风（影院化 + 胶片刻度）、AI 音乐＝SUNO 风（波形条 + 歌词卡）。
+   强调色只有这一份：桌面端 app/ui/theme.py 的 MODE_ACCENTS 必须与下面逐字一致，
+   tests/test_mode_theme.py 把两端的色值对拍钉死，防止两端慢慢跑偏（规则 3）。 */
+
+/* AI 智能体：ChatGPT 风——对话气泡优先，强调色走青绿 */
+html[data-mode="agent"] { --accent: #0f9d8f; --accent-ink: #f2fbf9; --blue: #12a89a; }
+
+/* 文生视频 / 图生视频＝PIKA 风（影院红）、AI 音乐＝SUNO 风（紫）。
+   文生图 / 图生图不写这一行：它们沿用 :root 里的 Midjourney 近白强调，
+   桌面端 theme.MODE_ACCENTS 里对应值必须是 None，两端才对得上。 */
+html[data-mode="t2v"],
+html[data-mode="i2v"] { --accent: #e8615c; --accent-ink: #1a0b0a; --blue: #e8615c; }
+html[data-mode="music"] { --accent: #b15cf6; --accent-ink: #150a1e; --blue: #b15cf6; }
+html[data-mode="agent"] .agent-log { padding: 20px 8px; }
+html[data-mode="agent"] .agent-bubble { border-radius: 16px; }
+html[data-mode="agent"] .agent-bubble.user {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+}
+html[data-mode="agent"] .agent-send { border-radius: 999px; padding-inline: 20px; }
+
+/* 文生视频 / 图转视频：PIKA 风——画幅优先、影院化底色、输入框上方一条胶片刻度 */
+html[data-mode="t2v"] .feed,
+html[data-mode="i2v"] .feed {
+  background:
+    radial-gradient(1100px 420px at 50% -10%,
+      color-mix(in srgb, #e8615c 14%, transparent), transparent 70%),
+    var(--bg);
+}
+html[data-mode="t2v"] .composer::before,
+html[data-mode="i2v"] .composer::before {
+  content: "";
+  display: block;
+  height: 10px;
+  margin: 0 0 10px;
+  border-radius: 3px;
+  background: repeating-linear-gradient(90deg, var(--line) 0 8px, transparent 8px 16px);
+  opacity: 0.6;
+}
+html[data-mode="t2v"] .tile video,
+html[data-mode="i2v"] .tile video {
+  outline: 1px solid color-mix(in srgb, #e8615c 45%, transparent);
+}
+
+/* AI 音乐：SUNO 风——输入框上方一条波形示意、描述框拉长成歌词卡 */
+html[data-mode="music"] .composer::before {
+  content: "";
+  display: block;
+  height: 30px;
+  margin: 0 0 10px;
+  border-radius: 999px;
+  background: repeating-linear-gradient(90deg,
+    color-mix(in srgb, #b15cf6 65%, transparent) 0 3px, transparent 3px 10px);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+  opacity: 0.5;
+}
+html[data-mode="music"] .prompt { min-height: 96px; border-radius: 16px; }

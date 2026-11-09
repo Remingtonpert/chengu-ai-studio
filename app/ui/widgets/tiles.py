@@ -115,6 +115,9 @@ class TileBase(QFrame):
     upscaleRequested = Signal(str)
     cancelRequested = Signal(str)
     retryRequested = Signal(str)
+    # 手动「另存」：产物本来就在项目内 output\（本工具即时显示的那份），这个信号让
+    # 创作页弹目录/文件名选择框，再复制一份到用户挑的位置（对应网页端的「另存」）。
+    saveRequested = Signal(str)
 
     def __init__(self, rec: TaskRecord, tile_w: int, tokens: dict[str, str]) -> None:
         super().__init__()
@@ -153,6 +156,17 @@ class TileBase(QFrame):
         acts.raise_()
         return acts
 
+    def save_button(self, text: str = "⬇ 另存", object_name: str = "vuBtn") -> QPushButton:
+        """「另存」按钮：点了由创作页弹保存对话框，把产物复制一份到自选位置。"""
+        button = QPushButton(text, self)
+        button.setObjectName(object_name)
+        button.setToolTip(
+            "把这份产物复制到你选的目录（可任意盘符/移动硬盘）；"
+            "项目内 output 里那份始终保留，本工具显示的就是它"
+        )
+        button.clicked.connect(lambda: self.saveRequested.emit(self.task_id))
+        return button
+
     def vu_buttons(self) -> list[QPushButton]:
         button_v = QPushButton("V 变化", self)
         button_u = QPushButton("U 放大", self)
@@ -160,7 +174,7 @@ class TileBase(QFrame):
             button.setObjectName("vuBtn")
         button_v.clicked.connect(lambda: self.variationRequested.emit(self.task_id))
         button_u.clicked.connect(lambda: self.upscaleRequested.emit(self.task_id))
-        return [button_v, button_u]
+        return [button_v, button_u, self.save_button()]
 
 
 class ImageTile(TileBase):
@@ -379,6 +393,7 @@ class VideoTile(TileBase):
         strip_layout.setSpacing(6)
         open_button = QPushButton("▶ 打开视频", self)
         folder_button = QPushButton("📁 文件夹", self)
+        save_button = self.save_button("⬇ 另存")
         for button in (open_button, folder_button):
             button.setObjectName("vuBtn")
         if video_path:
@@ -391,8 +406,10 @@ class VideoTile(TileBase):
         else:
             open_button.setEnabled(False)
             folder_button.setEnabled(False)
+            save_button.setEnabled(False)
         strip_layout.addWidget(open_button)
         strip_layout.addWidget(folder_button)
+        strip_layout.addWidget(save_button)
         strip_layout.addStretch(1)
         strip.raise_()
         frames = int(params.get("num_frames") or 0)
@@ -478,6 +495,10 @@ class MusicTile(TileBase):
         if audio_path:
             folder.clicked.connect(lambda: reveal_in_explorer(audio_path))
         layout.addWidget(folder)
+
+        save = self.save_button("⬇", object_name="btnMini")
+        save.setEnabled(audio_path is not None)
+        layout.addWidget(save)
 
         if self._player is not None:
             self._player.positionChanged.connect(self._on_position)

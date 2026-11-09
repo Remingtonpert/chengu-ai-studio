@@ -1,0 +1,6 @@
+@echo off
+rem 控制台代码页切到 UTF-8，否则 Python 打中文/emoji 会 UnicodeEncodeError
+chcp 65001 >nul
+set "PYTHONIOENCODING=utf-8"
+rem Run the REAL Wan2.1 video acceptance (txt2video + image2video) with auto-wait for free VRAM.
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0acceptance_video.ps1"
