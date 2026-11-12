@@ -1,14 +1,14 @@
 # 辰鹄 AI 创作中心：引擎调研
-> **2026-11-08 更新（读前必看）**：图像引擎已从 FLUX.1-schnell 换成 **SD1.5 精调 RealVis V5.1 + sd-vae-ft-mse + LCM-LoRA**（引擎 id `sd-realvis` / `sd-realvis-i2i`，磁盘 4.41 GB，真机显存峰值 1.88-2.09 GB）；FLUX 的权重、引擎代码与专用脚本**已全部删除**。本文中把 FLUX 当作现役模型的段落属于**历史记录**；许可与选型结论以 `LICENSES.md`、`docs\LICENSE_AUDIT.md` 文末「2026-11-08 增补」和 `README.md` 文末「FLUX 出局」一节为准。三条铁律：**可商用 / 中英文提示词 / 显存峰值 ≤6GB**。
+> **2026-11-10 更新（读前必看）**：文生图现职为 **Sana-1.6B 多语言版**（引擎 id `sana-multiling`，`Efficient-Large-Model/Sana_1600M_1024px_MultiLing_diffusers`，fp16 三件磁盘 9.06GB，逐模块 CPU 换入）；图生图为 **Wan2.1-VACE-1.3B**（引擎 id `wan-i2i`，与视频共用 `.venv-video` 与 `models\wan2.1`）。选型过程与被否决候选见下文「2026-11-10 文生图再次选型」一节。历史上的 FLUX.1-schnell（2026-11-08 因显存铁律整套删除）、SD1.5 精调 RealVis（2026-11-10 因 CLIP 不原生支持中文退选，代码与权重留盘但不注册）、`wan-t2i`（Wan2.1 单帧出图，2026-11-10 下架）**都不是现役能力**；本文中把它们当作现役的段落属于**历史记录**。许可与选型结论以 `LICENSES.md`、`docs\LICENSE_AUDIT.md` 文末增补为准。三条铁律：**可商用 / 中英文提示词 / 显存峰值 ≤6GB**。
 
-**状态：Phase 0 桌面资料调研完成（2026-10-11 快照）。此后项目已推进：FLUX.1-schnell 已集成并在 RTX 3060 上产出真实图片（多批成功产物 + 离线复现），ACE-Step 1.5 已集成（`.venv-music`，权重经 SHA-256/safetensors 逐文件校验通过），Anima 引用已于 2026-11-05 整体移除（真实上游为非商业许可，且代码原引用的仓库不存在），视频引擎 2026-11-05 收口接入 Wan2.1-T2V-1.3B / Wan2.1-VACE-1.3B（Apache-2.0，`.venv-video`，`models/wan2.1` 物理 44.18 GB）；中文提示词端到端与音乐端到端真机验收正在排队执行。当前进度真相源：根 `README.md`；模块与接口：`docs/MODULES.md`。**  
-**核查日期：2026-10-11**。仓库主分支是可变引用；官方仓库的精确 commit SHA 和模型文件字节数未能从当前网络环境取得，部署前必须重新记录并锁定（FLUX 快照 23 文件 / 33.73 GB、ACE-Step 四文件已实际锁定校验）。
+**状态：Phase 0 桌面资料调研完成（2026-10-11 快照）。此后项目已推进：FLUX.1-schnell 曾集成并在 RTX 3060 上产出真实图片（多批成功产物 + 离线复现），2026-11-08 因「峰值显存 ≤6GB」这条铁律整套删除（权重 23.7GB、磁盘 31.41GB，FP8 仍需 12GB 以上），SD1.5 三件套于同日接手、2026-11-09/11-10 两次重新选型后由 Sana-1.6B 多语言版接任文生图；ACE-Step 1.5 已集成（`.venv-music`，权重经 SHA-256/safetensors 逐文件校验通过），Anima 引用已于 2026-11-05 整体移除（真实上游为非商业许可，且代码原引用的仓库不存在），视频引擎 2026-11-05 收口接入 Wan2.1-T2V-1.3B / Wan2.1-VACE-1.3B（Apache-2.0，`.venv-video`，`models\wan2.1` 物理 44.18 GB），图生图 2026-11-09 起复用同一套 VACE 权重。当前进度真相源：根 `README.md`；模块与接口：`docs/MODULES.md`。**  
+**核查日期：2026-10-11**（文生图部分已于 2026-11-10 重新核查，取证见下文）。仓库主分支是可变引用；官方仓库的精确 commit SHA 和模型文件字节数未能从当前网络环境取得，部署前必须重新记录并锁定（Sana/ACE-Step/Wan 快照已实际锁定校验；FLUX 快照 23 文件 / 33.73 GB 属历史记录，权重已删除）。
 
 ## 结论摘要
 
 | 模态 | 优先候选 | 桌面证据 | 许可证/适配结论 | 决策（2026-11-05 现状标注） |
 |---|---|---|---|---|
-| 图片 | FLUX.1-schnell + Diffusers | BFL 官方代码列出 Apache-2.0 权重；Diffusers 有本地 pipeline 和 CPU offload 示例 | 适合作为首个候选；RTX 3060 的峰值显存、速度、完整 Windows 依赖组合仍未实测 | **已集成**：RTX 3060 真实出图 + 离线复现留证（见根 README） |
+| 图片 | （历史候选）FLUX.1-schnell + Diffusers；**2026-11-10 起现职为 Sana-1.6B 多语言版**（引擎 `sana-multiling`，Diffusers `SanaPipeline`），图生图为 Wan2.1-VACE（引擎 `wan-i2i`） | BFL 官方代码列出 Apache-2.0 权重；Diffusers 有本地 pipeline 和 CPU offload 示例；Sana 侧取证见「2026-11-10 文生图再次选型」一节 | 可商用（Apache-2.0 + 编码器 Gemma Terms of Use）、中英文/中英混合原生支持；Sana 的 6GB 内峰值是按权重体积推算的**预期值，尚未真机实测**（`peak_vram_mb` 会写进每次生成的元数据，验收脚本核对） | **FLUX 已出局**（2026-11-08：权重 23.7GB、FP8 仍需 12GB 以上，超「≤6GB 峰值」铁律，且上游已转 gated 403）；**SD1.5/RealVis 2026-11-10 退选**（CLIP 无中日韩词表，中文要关键词桥接，不满足「必须支持中英文」），代码与权重留盘但**不注册**；**`wan-t2i` 同日下架**（分辨率受 480p 视频档像素预算限制）。现役 = `sana-multiling` + `wan-i2i` |
 | 视频 | FramePack（I2V 优先） | 官方 README 明列 Windows、RTX 30/40/50、最低 6GB；官方 Windows 包为 CUDA 12.6 / PyTorch 2.6，并称模型另需下载 30GB 以上 | 12GB 仅有项目方最低显存声明，不是本机实测；模型权重许可与稳定可编程控制接口待核验 | 未采用；曾接入的 Anima 引用已于 2026-11-05 **整体移除**（其引用的 `moovenio/Anima_2B_model` 仓库不存在、本机 diffusers 无 `AnimaPipeline` 符号，真实上游 `circlestone-labs/Anima` 为文生图模型且非商业许可）；未采用；最终选型收口为 **Wan2.1 1.3B**（T2V + VACE，Apache-2.0），2026-11-05 已接入 |
 | 音乐 | ACE-Step v1.5 | 官方项目页提供 Windows venv 安装说明和本地运行/API 路线，2026-01-28 公告 v1.5 | README 的 8GB 优化与 3090 基准属于旧版本/旧测试，不能外推至 v1.5；v1.5 权重许可和 RTX 3060 实测未核实 | **已集成**（`.venv-music`，权重逐文件校验，12GB 档 DiT offload）；RTX 3060 端到端出音频验收仍排队，通过前不标记已验证 |
 
@@ -22,7 +22,9 @@
 - PyTorch 当前 Windows wheel、Python 3.14、CUDA wheel 与所选推理依赖须形成同一组可复现版本。显卡驱动显示的 CUDA UMD 版本不等于已经安装 CUDA Toolkit 或 PyTorch CUDA runtime。
 - 离线能力指已缓存所有权重、配置、tokenizer、代码与依赖后，在网络断开状态运行；首次准备会联网。每个引擎都要实测阻断联网后能否启动和推理。
 
-## 图片候选：FLUX.1-schnell + Hugging Face Diffusers
+## （历史）图片候选：FLUX.1-schnell + Hugging Face Diffusers
+
+> 本节保留作 2026-10-11 的调研记录。**FLUX.1-schnell 已于 2026-11-08 整套删除**（引擎代码、worker、权重、验收脚本全删，盘上不剩 1 个字节），当时它虽已在 RTX 3060 上真实出图，但 23.7GB 权重即使 FP8 也要 12GB 以上显存，与本机其它常驻程序共存时必然爆显存，直接违反「峰值 ≤6GB」这条铁律；随后上游仓库还转成 gated（直取 403）。下表中的「尚未实现」「待实测」等措辞是当时的状态，勿当现状读。
 
 | 项目 | 核查结果 |
 |---|---|
@@ -81,6 +83,36 @@
 |---|---|---|
 | Meta MusicGen / AudioCraft | [官方 AudioCraft 仓库](https://github.com/facebookresearch/audiocraft)模型卡明确：代码 MIT，权重 CC-BY-NC 4.0。 | 权重非商用。若项目要支持商业创作，应排除；如果仅个人非商业用途仍须遵守署名及非商业条款。仓库依赖和 Windows 独立部署也需另测。 |
 | Stable Audio Open | [官方模型仓库](https://huggingface.co/stabilityai/stable-audio-open-1.0)、[官方工具仓库](https://github.com/Stability-AI/stable-audio-tools)。 | 权重使用 Stability AI Community License，而非 Apache/MIT；条款有收入/用途等限制，且常规模型显存需求不能当成 12GB 适配保证。先不选。 |
+
+## 2026-11-10 文生图再次选型
+
+**为什么要再选一次**：2026-11-09 那轮把图片与音乐按「可商用 / 中英文 / 峰值 ≤6GB」整体下架重选时，文生图临时用 `wan-t2i`（Wan2.1-T2V-1.3B 的单帧副作用）顶上。11-10 复核发现它的天花板是结构性的：单帧出图的分辨率受**视频档 480p 像素预算**限制，又与视频共用同一份预算，因此永远拿不到 1024 级——用户要的「1024 档直出」在这里做不到。同日把文生图换成专用模型，图生图与视频保持不变（`wan-i2i` / `wan-t2v` / `wan-i2v`，Apache-2.0、UMT5-XXL 原生双语、已在盘上，零新增下载）。
+
+**入选：Sana-1.6B 多语言版**（引擎 id `sana-multiling`，仓库 `Efficient-Large-Model/Sana_1600M_1024px_MultiLing_diffusers`）。三条硬标准的取证全部来自 huggingface.co 原始仓库与模型卡原文（本会话经 HF 仓库 API 读取元数据）：
+
+| 硬标准 | 取证 | 结论 |
+|---|---|---|
+| 可商用 | 仓库 `license=apache-2.0`、`gated=false`；快照内含 11358 字节的 Apache-2.0 `LICENSE` 文件 | ✅ 不需要 token，可商用与再分发 |
+| 编码器合规 | 文本编码器来自 `google/gemma-2-2b-it`，受 **Gemma Terms of Use** 约束（允许商用，附禁止用途条款）；权重已内置在本仓库 `text_encoder/` 下，不必登录 Google 的受限仓库 | ✅ 但再分发要按 Gemma 条款传递，台账单列一行 |
+| 原生中英文 | 模型卡原文：「This model is fine-tuned from the base model Efficient-Large-Model/Sana_1600M_1024px_BF16 and it supports Emoji, Chinese and English and all mixed prompts.」 | ✅ 中文直接进编码器，产品**不做**翻译桥接 |
+| 峰值显存 ≤6GB | fp16 三件：Gemma-2-2B 编码器 4757.0+229.5MB（最大单件 4.99GB）、Linear-DiT transformer 3060.3MB、DC-AE 32× VAE 1191.2MB；逐模块 CPU 换入 → 任一时刻显存里只有当前一件 | ⚠️ 按最大单件 + 激活推算压在 6GB 内，**这是预期值、尚未真机实测**（本机显存被常驻大模型占满）；实测值由 `peak_vram_mb` 写进元数据，验收脚本逐档核对 |
+
+**当天被否决的候选**（理由均取自原始仓库/模型卡，不是二手评测）：
+
+| 候选 | 原始出处结论 | 否决理由 |
+|---|---|---|
+| Kolors | 模型 README 原文：商用需填问卷申请 | 不是无条件可商用，与「可商用」铁律冲突；权重 16.6GB 也超预算 |
+| Chroma1-HD | 42.19GB，且基于 FLUX.1-schnell | 体积是硬指标的 7 倍；FLUX 血统本身已出局 |
+| CogView4-6B | Apache-2.0、中英双语（这两条其实合格） | 28.99GB，显存档不住，6GB 铁律过不去 |
+| HunyuanDiT | HF 元数据 `license:other`（条件授权） | 许可条款不确定，商用与再分发不能一句话讲清 |
+| Janus-Pro-1B | README 声明受 DeepSeek Model License 约束 | 非无条件商用，条款额外限制用途 |
+| FLUX.1-schnell | 权重 23.7GB、FP8 仍需 12GB 以上；上游已转 gated（403） | 超 6GB 硬指标；本轮明确排除，不再回到候选池 |
+| SD1.5 + RealVis V5.1 | SD1.5 的 CLIP 没有中日韩词表，中文只能靠关键词桥接 | **选型问题，不是许可问题**：不满足「必须原生支持中英文」。代码与权重保留在盘上作后备（它是历史上唯一实测过峰值的出图路径，4359MB），但**不注册、界面上看不到** |
+| `wan-t2i` | 单帧出图继承视频档 480p 像素预算 | 拿不到 1024 级；已由专用文生图模型取代，历史任务记录仍可读，不删数据 |
+
+**落地口径（与代码一致，不要自造第二套数字）**：运行环境 `.venv-image`（torch 2.14.1+cu130、diffusers 0.41.0、transformers 5.19.0）；权重 `models\sana-multiling` 磁盘实测 **9.06GB**（下载脚本按 fp16 变体约 9.3GB，黑名单跳过 fp32 与原分片）；宽高必须是 **32 的倍数**（DC-AE 32× 下采样），默认 1024×1024，单遍像素预算 **1.10MP**，目标像素硬上限 **4.20MP**（2048×2048）；steps 默认 **20**、引擎按 **10-40** 夹取；CFG 固定 **4.5**（不是用户参数）。超单遍预算走「按预算出底图 + Lanczos 放大」，元数据 `upscaled=true`、`tiles=0`，不谎称高清重绘、不谎称原生 1080p。空闲显存 <5120MB 自动退到逐层换入，<1500MB 直接拒绝并点名占用者；加载权重要求空闲物理内存 ≥16GB。
+
+**仍待补的两件事**：① Sana 真机显存峰值（跑 `scripts\acceptance_image.bat`，两档逐档打印实测峰值，超过 6000MB 立即停止）；② DC-AE VAE 上游仓库（`mit-han-lab/dc-ae-f32c32-sana-1.0-diffusers`，其 `_name_or_path` 写在 `vae/config.json`）的许可**待联网复核**，台账里标「待复核」，不得写成已核验。
 
 ## 推荐执行顺序（等待用户确认）
 

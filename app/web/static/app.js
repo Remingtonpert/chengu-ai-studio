@@ -3,7 +3,8 @@
 /* 辰鹄AI创作中心 前端 —— Midjourney Web 式交互，全部走现有 /api/* 与 /outputs/*。
  * 零外部依赖、离线可用；会话与参数保存在浏览器 localStorage，任务本体仍由后端 SQLite 队列管理。
  * 图生视频（i2v）走现有视频参数（init_image_path 作首帧），后端未改动。
- * 文生图 / 图生图 = Wan2.1 单帧档（num_frames=1），与视频共用 .venv-video 与权重；
+ * 文生图 = Sana-1.6B 多语言版（sana-multiling，独立 .venv-image 与 models/sana-multiling）；
+ * 图生图 = Wan2.1 VACE 单帧档（num_frames=1），与视频共用 .venv-video 与权重；
  * AI 音乐 = ACE-Step 1.5。六个板块全部对应当前已注册的引擎。 */
 
 const $ = (id) => document.getElementById(id);
@@ -28,15 +29,16 @@ const LS = {
 };
 
 /* 引擎 → 支持的任务类型（与 app/engine_registration.py 一致）。
-   图片（wan-t2i / wan-i2i）是 Wan2.1 的单帧档，与视频共用同一套权重与 venv。 */
+   文生图 sana-multiling（Sana-1.6B 多语言版）走独立的 .venv-image 与 models/sana-multiling；
+   图生图 wan-i2i（VACE-1.3B 参考重绘）仍是 Wan2.1 的单帧档，与视频共用同一套权重与 venv。 */
 const ENGINE_TASK_TYPES = {
-  "wan-t2i": ["image"], "wan-i2i": ["image"],
+  "sana-multiling": ["image"], "wan-i2i": ["image"],
   "wan-t2v": ["video"], "wan-i2v": ["video"],
   "ace-step-15": ["music"],
 };
 /* 模式 → 引擎白名单：一个模式只认一个引擎，避免选错权重。 */
 const MODE_ENGINE_ALLOW = {
-  t2i: ["wan-t2i"], i2i: ["wan-i2i"],
+  t2i: ["sana-multiling"], i2i: ["wan-i2i"],
   t2v: ["wan-t2v"], i2v: ["wan-i2v"],
   music: ["ace-step-15"],
 };
@@ -47,10 +49,153 @@ const ENGINE_STATE_LABELS = { ready: "就绪", stopped: "未启动", starting: "
    总显存低于该门槛前端直接拦下提交。 */
 const VIDEO_MIN_VRAM_MB = 6144;
 const VIDEO_FREE_FLOOR_MB = 2000;   // 提交前要求的实测空闲显存，略高于引擎侧的 1500MB
-/* 视频真实像素预算（与 app/engine/video/wan.py _MAX_PIXELS = 832*480*1.15 一致）：
-   超预算的宽高会被引擎自动缩小，1.3B 档最高就是约 480p（约 0.46MP）。
-   文生图 / 图生图走同一引擎的单帧档（num_frames=1），预算与显存门槛完全一致。 */
-const VIDEO_MAX_PIXELS = 460800;
+/* 视频真实像素预算 + token 档位账：与 app/engine/video/budget.py 同名同值，
+   改一处必须同步另一处（1.3B 档最高就是约 480p，459264px = 832*480*115/100，整数算法 ≈ 0.46MP；
+   注意别用 1.15 这种浮点写法：Python 侧 int(832*480*1.15) 会得到 459263，少 1 像素。
+   桌面端 param_panel 也是 import 这同一个数，全仓只此一份）。
+   6GB 显存档位真正的驱动量是 DiT 的 token 数 =（宽/16）×（高/16）×压缩帧数，
+   压缩帧数 = (帧数-1)/4+1，上限 20000。
+   **引擎不再自动降档**：超预算的组合在提交前就被前端挡下（后端同样会 400 兜底），
+   提示里给出这一档的真实上限，让用户自己选方向。图生图走同一引擎的单帧档
+   （num_frames=1），像素预算与显存门槛与视频一致，token 天然在线内。 */
+const VIDEO_MAX_PIXELS = 459264;
+const VIDEO_MAX_TOKENS = 20000;
+const VIDEO_MIN_FRAMES = 5;
+const VIDEO_MAX_FRAMES = 161;
+/* 图生图 + 视频（Wan 480p 档）宽/高控件范围：倍数 16、滑杆 256-1024，与桌面端 param_panel 同口径。 */
+const VIDEO_MULTIPLE = 16;
+const VIDEO_MIN_SIDE = 256;
+const VIDEO_MAX_SIDE = 1024;
+
+/* ↓ 以下四个函数是 budget.py 里同名函数的直译（同一套数字、同一个算法），
+      这样网页提交前算出的 token 与最长帧数，跟引擎子进程真跑时用的是同一份账。 */
+const videoRoundMultiple = (value) => {
+  const number = Math.max(VIDEO_MULTIPLE * 8, Math.min(Math.round(Number(value) || 0), 2048));
+  return Math.round(number / VIDEO_MULTIPLE) * VIDEO_MULTIPLE;
+};
+const videoLatentFrames = (frames) => Math.floor((frames - 1) / 4) + 1;
+const videoTokens = (width, height, frames) => Math.max(
+  1,
+  Math.floor(width / VIDEO_MULTIPLE) * Math.floor(height / VIDEO_MULTIPLE) * videoLatentFrames(frames),
+);
+/* 这一档分辨率在 token 预算内最长能跑到第几帧（4n+1；放不下则 0） */
+const videoMaxFrames = (width, height) => {
+  const cells = Math.max(1, Math.floor(width / VIDEO_MULTIPLE) * Math.floor(height / VIDEO_MULTIPLE));
+  const latent = Math.floor(VIDEO_MAX_TOKENS / cells);
+  if (latent < 1) return 0;
+  return Math.min((latent - 1) * 4 + 1, VIDEO_MAX_FRAMES);
+};
+/* 保持当前比例，token 预算内允许的最大档位（格子 = 16px 一边） */
+function videoMaxSize(frames, width, height) {
+  const latent = videoLatentFrames(snapFrames(frames));
+  const cellsBudget = Math.max(1, Math.floor(VIDEO_MAX_TOKENS / latent));
+  let wc = Math.max(1, videoRoundMultiple(width) / VIDEO_MULTIPLE);
+  let hc = Math.max(1, videoRoundMultiple(height) / VIDEO_MULTIPLE);
+  if (wc * hc <= cellsBudget) return [wc * VIDEO_MULTIPLE, hc * VIDEO_MULTIPLE];
+  const ratio = hc / wc;
+  wc = Math.max(1, Math.floor(Math.sqrt(cellsBudget / ratio)));
+  hc = Math.max(1, Math.round(wc * ratio));
+  while (wc * hc > cellsBudget && Math.min(wc, hc) > 1) {
+    if (wc >= hc) wc -= 1; else hc -= 1;
+  }
+  while (Math.round(wc + 1) * Math.max(1, Math.round((wc + 1) * ratio)) <= cellsBudget) {
+    wc += 1;
+    hc = Math.max(1, Math.round(wc * ratio));
+  }
+  return [wc * VIDEO_MULTIPLE, hc * VIDEO_MULTIPLE];
+}
+/* 按请求比例缩到 480p 像素预算内：只用来报「这一比例最大可用多少」，不改用户档位 */
+function fitVideoPixels(width, height) {
+  let w = videoRoundMultiple(width);
+  let h = videoRoundMultiple(height);
+  if (w * h > VIDEO_MAX_PIXELS) {
+    const scale = Math.sqrt(VIDEO_MAX_PIXELS / (w * h));
+    w = Math.max(VIDEO_MULTIPLE, videoRoundMultiple(w * scale));
+    h = Math.max(VIDEO_MULTIPLE, videoRoundMultiple(h * scale));
+    while (w * h > VIDEO_MAX_PIXELS) {
+      if (w >= h) w = Math.max(VIDEO_MULTIPLE, w - VIDEO_MULTIPLE);
+      else h = Math.max(VIDEO_MULTIPLE, h - VIDEO_MULTIPLE);
+    }
+  }
+  return [w, h];
+}
+/* 把用户选的档位折算成判定 + 可显示的具体数字（对应 budget.evaluate） */
+function budgetReport(width, height, frames) {
+  const f = snapFrames(frames ?? 33);
+  const pixels = width * height;
+  const tokens = videoTokens(width, height, f);
+  const capFrames = videoMaxFrames(width, height);
+  const capSize = videoMaxSize(f, width, height);
+  const overPixels = pixels > VIDEO_MAX_PIXELS;
+  const overTokens = tokens > VIDEO_MAX_TOKENS;
+  return {
+    ok: !(overPixels || overTokens),
+    width, height, frames: f,
+    seconds: Number((f / VIDEO_FPS).toFixed(2)),
+    pixels, tokens,
+    capFrames,
+    capSeconds: capFrames ? Number((capFrames / VIDEO_FPS).toFixed(2)) : 0,
+    capSize, overPixels, overTokens,
+  };
+}
+/* 超预算时的中文说明：具体数字 + 两条出路，不承诺任何自动降档（对应 budget.explain_over） */
+function budgetProblemText(report, label = "视频") {
+  if (report.overPixels) {
+    const cap = fitVideoPixels(report.width, report.height);
+    return `${label} ${report.width}×${report.height} 超出 Wan2.1 1.3B 的 480p 像素上限 ${VIDEO_MAX_PIXELS}px`
+      + `（约 0.46MP）：本工具不会自动降档。这一比例最大可用 ${cap[0]}×${cap[1]}，请改到该尺寸或更小再提交。`;
+  }
+  const keepSize = report.capFrames >= VIDEO_MIN_FRAMES
+    ? `保持 ${report.width}×${report.height}：最长 ${report.capFrames} 帧（${report.capSeconds} 秒 @${VIDEO_FPS}fps）。`
+    : `保持 ${report.width}×${report.height}：连最低 ${VIDEO_MIN_FRAMES} 帧都放不下，只能降分辨率。`;
+  return [
+    `${label} ${report.width}×${report.height} @ ${report.frames} 帧需要 ${report.tokens} tokens，`
+      + `超过 6GB 显存档位的 ${VIDEO_MAX_TOKENS} tokens 上限（这就是 6GB 峰值的驱动量）。`,
+    keepSize,
+    `保持 ${report.frames} 帧（${report.seconds} 秒）：最大只能 ${report.capSize[0]}×${report.capSize[1]}。`,
+    "不会自动降档，也不会偷改帧数：请二选一后重新提交。",
+  ].join(" ");
+}
+/* 文生图（sana-multiling，口径见 app/engine/image/plan.py 的 SANA_*）：
+   对齐倍数 32（DC-AE 是 32 倍下采样）；宽/高滑杆 320-2048、步进 32；
+   单遍像素预算 1100000（≈1024 级，超过就按预算出底图再 Lanczos 放大到目标尺寸）；
+   目标像素硬上限 4200000（2048×2048，再高就是纯插值，引擎直接拒绝）。
+   与桌面端 param_panel 的 IMAGE_T2I_MULTIPLE / IMAGE_T2I_MAX_PIXELS / IMAGE_T2I_MAX_TARGET_PIXELS 同一份数。 */
+const IMAGE_T2I_MULTIPLE = 32;
+const IMAGE_T2I_MIN_SIDE = 320;
+const IMAGE_T2I_MAX_SIDE = 2048;
+const IMAGE_T2I_MAX_PIXELS = 1100000;
+const IMAGE_T2I_MAX_TARGET_PIXELS = 4200000;
+/* 尺寸档位：与桌面端 param_panel.ASPECT_CHIPS_T2I / ASPECT_CHIPS_VIDEO 同名、同序、标签逐字一致。
+   文生图（Sana）是 1024 级表，1920×1088 那条超出单遍预算、走「底图 + 放大」，标签里已写明；
+   图生图与视频仍是原来的 480p 表。 */
+const ASPECT_CHIPS_T2I = [
+  [1024, 1024, "1:1 1024"],
+  [1152, 640, "16:9 1024级"],
+  [640, 1152, "9:16 1024级"],
+  [1152, 864, "4:3 1024级"],
+  [864, 1152, "3:4 1024级"],
+  [1920, 1088, "16:9 1080p（放大）"],
+];
+const ASPECT_CHIPS_VIDEO = [
+  [832, 480, "16:9"],
+  [480, 832, "9:16"],
+  [624, 624, "1:1"],
+  [640, 480, "4:3"],
+  [480, 640, "3:4"],
+];
+const aspectChipsFor = (mode) => (mode === "t2i" ? ASPECT_CHIPS_T2I : ASPECT_CHIPS_VIDEO);
+/* 板块 → 尺寸口径：文生图走 Sana 的 32 倍数与 1.10MP 单遍预算；
+   图生图 / 视频走 Wan 的 16 倍数与 480p 预算（预算与硬上限在 Wan 档是同一个数）。 */
+const sizeLimits = (mode) => (mode === "t2i"
+  ? {
+    lo: IMAGE_T2I_MIN_SIDE, hi: IMAGE_T2I_MAX_SIDE, step: IMAGE_T2I_MULTIPLE,
+    budget: IMAGE_T2I_MAX_PIXELS, target: IMAGE_T2I_MAX_TARGET_PIXELS,
+  }
+  : {
+    lo: VIDEO_MIN_SIDE, hi: VIDEO_MAX_SIDE, step: VIDEO_MULTIPLE,
+    budget: VIDEO_MAX_PIXELS, target: VIDEO_MAX_PIXELS,
+  });
 /* 音乐（ACE-Step 1.5，app/tasks/music_worker.py MUSIC_MIN_VRAM_MB）显存门槛（MB）：
    总显存低于 6GB 直接拦下提交；空闲门槛与 worker health_check 的 free gate 对齐（6144），
    因为 LM/DiT 走 CPU 卸载时的显存峰值只做过估算、尚未真机实测，宁可保守。 */
@@ -97,7 +242,7 @@ const MODES = ["agent", "t2i", "i2i", "t2v", "i2v", "music"];
 const MODALITY = { t2i: "image", i2i: "image", t2v: "video", i2v: "video", music: "music" };
 const MODE_LABELS = { agent: "AI 智能体", t2i: "文生图", i2i: "图生图", t2v: "文生视频", i2v: "图生视频", music: "AI音乐" };
 const PLACEHOLDERS = {
-  t2i: "描述你想要的画面…（Wan2.1-T2V-1.3B 单帧档 · 最高约 480p · 中英文提示词都认）",
+  t2i: "描述你想要的画面…（Sana-1.6B 多语言版 · 中文英文混着写都行 · 1024 级直出，可到 1080p）",
   i2i: "先放参考图，再描述想改成什么样…（Wan2.1-VACE-1.3B 按垫图参考重绘）",
   t2v: "描述动态画面…（Wan2.1-T2V-1.3B · 16fps mp4 · 最高约 480p）",
   i2v: "先放首帧图片，再描述画面如何运动…（Wan2.1-I2V-1.3B · 16fps mp4）",
@@ -149,11 +294,14 @@ const randSeed = () => Math.floor(Math.random() * 0x7fffffff);
 const clampInt = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(v)));
 
 function defaultModeParams(mode) {
-  /* 图片与视频共用 Wan 单引擎：默认尺寸落在引擎真实像素预算内（约 480p 档，
-     见 app/engine/video/wan.py _MAX_PIXELS）；音乐档不用尺寸，steps 用 turbo 默认 8。
+  /* 文生图（Sana）默认 1024×1024、steps 20（引擎按 10-40 夹取），落在它自己的单遍预算内；
+     图生图与视频共用 Wan 单引擎，默认尺寸落在该引擎真实像素预算内（约 480p 档，
+     见 app/engine/video/wan.py _MAX_PIXELS），steps 默认 28；音乐档不用尺寸，steps 用 turbo 默认 8。
      「AI 智能体」页不用参数面板，借用一个视频参数桶保持结构一致。 */
-  const steps = mode === "music" ? 8 : 28;
-  return { width: 832, height: 480, steps, frames: 33, seedLock: false, seed: null, negative: "", advanced: "" };
+  const steps = mode === "music" ? 8 : mode === "t2i" ? 20 : 28;
+  const width = mode === "t2i" ? 1024 : 832;
+  const height = mode === "t2i" ? 1024 : 480;
+  return { width, height, steps, frames: 33, seedLock: false, seed: null, negative: "", advanced: "" };
 }
 function defaultSettings() {
   const modes = {};
@@ -161,7 +309,7 @@ function defaultSettings() {
   return {
     mode: "agent",
     refDir: "",
-    vengine: "",                   // 图片 + 视频模态引擎（wan-t2i / wan-i2i / wan-t2v / wan-i2v，按标签页白名单自动落位）
+    vengine: "",                   // 图片 + 视频模态引擎（sana-multiling / wan-i2i / wan-t2v / wan-i2v，按标签页白名单自动落位）
     mengine: "",                   // 音乐模态引擎（ace-step-15）
     bpm: 120,                      // 音乐参数：与桌面端 param_panel 同名同范围（30-300，面板滑杆 60-180）
     musicDuration: 180,            // 目标时长（秒），worker 侧 10-480
@@ -280,7 +428,7 @@ async function saveTaskArtifact(taskId) {
   const rec = state.tasks.get(taskId);
   if (!rec) { showToast("任务未找到（可能被后端清理）", "error"); return; }
   const file = mainArtifact(rec);
-  if (!file) { showToast("该任务没有可另存的产物", "error"); return; }
+  if (!file) { showToast("该任务还没有可另存的产物", "error"); return; }
   await saveArtifactToDisk(file);
 }
 
@@ -339,10 +487,53 @@ function activeSession() {
 
 /* ------------------------------------------------------------------ 参数面板 */
 
+/* 尺寸分区按板块换一套口径：文生图（Sana）用 1024 级档位表与 320-2048 / 步进 32，
+   图生图与视频（Wan）用原来的 480p 档位表与 256-1024 / 步进 16。
+   控件的 min/max/step 属性改了必须当场回填当前值，否则滑杆会停在被旧范围夹过的位置。 */
+function applySizeChrome() {
+  const lim = sizeLimits(state.mode);
+  const title = $("size-title");
+  if (title) {
+    title.textContent = state.mode === "t2i" ? "生成尺寸（1024 级，可到 1080p）" : "生成尺寸（480p 档像素预算）";
+  }
+  const box = $("aspect-chips-v");
+  const chips = aspectChipsFor(state.mode);
+  const sig = chips.map((c) => c.join(":")).join("|");
+  if (box.dataset.set !== sig) {
+    box.dataset.set = sig;
+    box.textContent = "";
+    for (const [w, h, label] of chips) {
+      const chip = el("button", "chip", label);
+      chip.dataset.w = String(w);
+      chip.dataset.h = String(h);
+      box.appendChild(chip);
+    }
+  }
+  for (const id of ["vwidth", "vheight"]) {
+    for (const suffix of ["-range", "-num"]) {
+      const input = $(id + suffix);
+      input.setAttribute("min", String(lim.lo));
+      input.setAttribute("max", String(lim.hi));
+      input.setAttribute("step", String(lim.step));
+    }
+  }
+}
+
 function syncVideoSize() {
   const s = state.p;
-  $("vwidth-range").value = Math.min(832, Math.max(256, s.width));
-  $("vheight-range").value = Math.min(832, Math.max(256, s.height));
+  const lim = sizeLimits(state.mode);
+  /* 桶里的值先按当前板块的倍数夹回来再回填：文生图的 1024 不会被 480p 档的旧上限卡回 832，
+     反过来 480p 档的 624 进文生图也会落到 32 的倍数（640），不给引擎送一个不对齐的尺寸。 */
+  const snapSide = (value) => {
+    const raw = Number(value);
+    const base = Number.isFinite(raw) && raw > 0 ? raw : lim.lo;
+    return clampInt(Math.round(base / lim.step) * lim.step, lim.lo, lim.hi);
+  };
+  s.width = snapSide(s.width);
+  s.height = snapSide(s.height);
+  applySizeChrome();
+  $("vwidth-range").value = s.width;
+  $("vheight-range").value = s.height;
   $("vwidth-num").value = s.width;
   $("vheight-num").value = s.height;
   for (const chip of $("aspect-chips-v").children) {
@@ -352,15 +543,35 @@ function syncVideoSize() {
   const f = snapFrames(s.frames ?? 33);
   const hint = $("v-vram-hint");
   const isImage = MODALITY[state.mode] === "image";
-  if (px > VIDEO_MAX_PIXELS) {
+  if (state.mode === "t2i") {
+    /* 文生图（Sana）：超过单遍预算不是错误，而是换「预算内出底图 + 放大」这条路径；
+       超过目标硬上限才是真拒绝（滑杆范围到不了，走高级参数越界时提示出来）。 */
+    if (px > IMAGE_T2I_MAX_TARGET_PIXELS) {
+      hint.className = "hint warn";
+      hint.textContent = `${s.width}×${s.height}（${(px / 1e6).toFixed(2)}MP）超过 Sana 的目标像素硬上限 ${IMAGE_T2I_MAX_TARGET_PIXELS}px（2048×2048）：再高就是纯插值，引擎直接拒绝，请把宽高调小。`;
+    } else if (px > IMAGE_T2I_MAX_PIXELS) {
+      hint.className = "hint warn";
+      hint.textContent = `${s.width}×${s.height}（${(px / 1e6).toFixed(2)}MP）超过 Sana 的 1024 级单遍像素预算 ${IMAGE_T2I_MAX_PIXELS}px：引擎会按预算出底图再放大到目标尺寸（产物元数据 upscaled=true）。`;
+    } else {
+      hint.className = "hint";
+      hint.textContent = `文生图像素 ${(px / 1e6).toFixed(2)}MP · Sana-1.6B 多语言版按 32 的倍数对齐（DC-AE 32 倍下采样），按 6GB 显存档位设计（fp16 三件权重走逐模块 CPU 换入，峰值为按体积推算的预期值、尚未实测，验收看任务元数据 peak_vram_mb）；加载权重需要约 16GB 空闲物理内存。`;
+    }
+  } else if (px > lim.budget || (MODALITY[state.mode] === "video" && !budgetReport(s.width, s.height, f).ok)) {
     hint.className = "hint warn";
-    hint.textContent = `${s.width}×${s.height}（${(px / 1e6).toFixed(2)}MP）超出 Wan2.1 1.3B 的像素预算 ${VIDEO_MAX_PIXELS}px（约 0.46MP，≈480p）：引擎会等比缩小到预算内，产物实际分辨率以引擎为准。`;
+    hint.textContent = budgetProblemText(
+      budgetReport(s.width, s.height, isImage ? 1 : f),
+      isImage ? "图生图" : "视频",
+    );
   } else if (isImage) {
     hint.className = "hint";
-    hint.textContent = `图片像素 ${(px / 1e6).toFixed(2)}MP · 与视频同一个 Wan 引擎的单帧档（num_frames=1），按 6GB 显存档位设计（bf16 + 逐层 CPU 卸载；单帧峰值应明显低于视频实测的约 2GB，未实测）；逐层卸载还需要约 16GB 空闲物理内存。`;
+    hint.textContent = `图生图像素 ${(px / 1e6).toFixed(2)}MP · 图生图 wan-i2i 与视频同一个 Wan 引擎的单帧档（num_frames=1），按 6GB 显存档位设计（bf16 + 逐层 CPU 卸载；单帧 token 约为 81 帧视频的 1/13，所以图生图峰值预期低于视频实测的约 2GB，未实测）；逐层卸载还需要约 16GB 空闲物理内存。要 1024 级的高像素出图请用「文生图」板块。`;
   } else {
+    const rep = budgetReport(s.width, s.height, f);
     hint.className = "hint";
-    hint.textContent = `视频像素 ${(px / 1e6).toFixed(2)}MP · 按 6GB 显存档位设计（bf16 + 逐层 CPU 卸载，实测峰值约 2GB）；逐层卸载还需要约 16GB 空闲物理内存。帧数越长越吃显存与时间（当前 ${f} 帧 @16fps）。`;
+    hint.textContent = `视频档位 ${s.width}×${s.height} @ ${f} 帧（${rep.seconds} 秒 @16fps）`
+      + ` = ${rep.tokens} tokens / 上限 ${VIDEO_MAX_TOKENS}；这一比例最长 ${rep.capFrames} 帧（${rep.capSeconds} 秒），`
+      + `这个帧数下最大 ${rep.capSize[0]}×${rep.capSize[1]}。档位钉死：引擎按你选的档位原样出片，不会自动降档；`
+      + `越线在提交前就挡下，不会白排队。逐层 CPU 卸载还需要约 16GB 空闲物理内存。`;
   }
   updateComposerMeta();
 }
@@ -370,19 +581,28 @@ function syncFrames() {
   state.p.frames = f;
   $("frames-range").value = f;
   $("frames-label").textContent = `${(f / VIDEO_FPS).toFixed(2)} 秒 · ${f} 帧 @16fps`;
+  syncVideoSize();   // 时长一动，档位 token 与「这一比例最长几帧」就按同一份账重算一遍
   updateComposerMeta();
 }
 
 function syncSteps() {
   const range = $("steps-range");
-  range.max = "50";
-  range.value = Math.min(Number(range.max), Math.max(1, state.p.steps));
+  /* 文生图（Sana）引擎按 10-40 夹取，滑杆就给 10-40（默认 20）；其余板块保持原来的 1-50。
+     切板块后范围变了，先把桶里的值夹进新范围再回填，不然显示值与提交值会不一致。 */
+  const lo = state.mode === "t2i" ? 10 : 1;
+  const hi = state.mode === "t2i" ? 40 : 50;
+  state.p.steps = clampInt(state.p.steps, lo, hi);
+  range.min = String(lo);
+  range.max = String(hi);
+  range.value = state.p.steps;
   $("steps-label").textContent = `${state.p.steps} 步`;
   const modality = MODALITY[state.mode];
   if (modality === "music") {
     $("steps-hint").textContent = "音乐 turbo 权重默认 8 步（推荐）；最多 50 步，步数越多等待越长。";
+  } else if (state.mode === "t2i") {
+    $("steps-hint").textContent = "文生图（Sana）默认 20 步，引擎范围 10-40；6GB 上步数直接决定等待时长。";
   } else if (modality === "image") {
-    $("steps-hint").textContent = "图片推荐 28 步（默认）；6GB 上步数直接决定等待时长。";
+    $("steps-hint").textContent = "图生图推荐 28 步（默认）；6GB 上步数直接决定等待时长。";
   } else {
     $("steps-hint").textContent = "视频推荐 28 步（默认）；6GB 上步数直接决定等待时长。";
   }
@@ -476,7 +696,7 @@ function setMode(mode) {
   commitPanelText();
   state.mode = mode;
   state.settings.mode = mode;
-  if (!state.settings.modes[mode]) state.settings.modes[mode] = defaultModeParams();
+  if (!state.settings.modes[mode]) state.settings.modes[mode] = defaultModeParams(mode);
   state.p = state.settings.modes[mode];
   clearRef();
   hydrateChrome();
@@ -544,8 +764,9 @@ function collectVideoParams(refPath) {
   return params;
 }
 
-/* 图片档参数：与视频同一引擎，只是不传 num_frames（单帧档由引擎固定 num_frames=1，
-   worker 的图片白名单也不收 num_frames）；i2i 的参考图同样走 init_image_path。 */
+/* 图片档参数：文生图走 sana-multiling（Sana 按 32 的倍数、steps 由引擎夹到 10-40），
+   图生图走 wan-i2i 单帧档（引擎固定 num_frames=1）；两者都不传 num_frames
+   （worker 的图片白名单也不收），i2i 的参考图同样走 init_image_path。 */
 function collectImageParams(refPath) {
   const s = state.p;
   const params = { width: s.width, height: s.height, steps: s.steps };
@@ -598,7 +819,7 @@ async function refreshHealth() {
   }
 }
 
-/* AI 智能体板块不绑定某一个引擎：后端按板块自动挑引擎（文生图 wan-t2i / 图生图 wan-i2i、
+/* AI 智能体板块不绑定某一个引擎：后端按板块自动挑引擎（文生图 sana-multiling / 图生图 wan-i2i、
    文生视频 wan-t2v / 图生视频 wan-i2v、音乐 ace-step-15，见 app/agent/service.py）。
    早期版本在这里按板块筛选引擎，AI 智能体没有 modality，筛完只剩空列表，
    于是顶部胶囊固定显示红色的「无引擎」，和桌面端完全不一样。现在改为显示全部引擎的概况。 */
@@ -651,9 +872,13 @@ async function refreshEngines() {
     if (modality === "music") {
       els.engineSelect.appendChild(el("option", null, "音乐引擎未注册 · 需 .venv-music 与 models\\ace-step-1.5"));
       els.engineState.textContent = "音乐引擎未注册：需 .venv-music（运行 scripts\\setup_music_venv.ps1）与 models\\ace-step-1.5 权重（运行 scripts\\download_music_weights.py，MIT），未就绪前不会提交、不伪造输出";
+    } else if (state.mode === "t2i") {
+      /* 文生图换型后走独立环境：.venv-image + models\sana-multiling，与视频那套完全分开。 */
+      els.engineSelect.appendChild(el("option", null, "文生图引擎未注册 · 需 .venv-image 与 models\\sana-multiling"));
+      els.engineState.textContent = "文生图引擎未注册：需 .venv-image（torch cu130 + diffusers + transformers，可用 scripts\\verify_env.py 自检）与 models\\sana-multiling 权重（运行 scripts\\download_sana_weights.py，Apache-2.0），未就绪前不会提交、不伪造输出";
     } else if (modality === "image") {
-      els.engineSelect.appendChild(el("option", null, "图片引擎未注册 · 需 .venv-video 与 models\\wan2.1"));
-      els.engineState.textContent = "图片引擎未注册：图片档与视频共用 .venv-video（运行 scripts\\setup_video_venv.ps1）与 models\\wan2.1 权重（运行 scripts\\download_video_weights.py，Apache-2.0），未就绪前不会提交、不伪造输出";
+      els.engineSelect.appendChild(el("option", null, "图生图引擎未注册 · 需 .venv-video 与 models\\wan2.1"));
+      els.engineState.textContent = "图生图引擎未注册：图生图与视频共用 .venv-video（运行 scripts\\setup_video_venv.ps1）与 models\\wan2.1 权重（运行 scripts\\download_video_weights.py，Apache-2.0），未就绪前不会提交、不伪造输出";
     } else {
       els.engineSelect.appendChild(el("option", null, "视频引擎未注册 · 需 .venv-video 与 models\\wan2.1"));
       els.engineState.textContent = "视频引擎未注册：需 .venv-video（运行 scripts\\setup_video_venv.ps1）与 models\\wan2.1 权重（运行 scripts\\download_video_weights.py，Apache-2.0），未就绪前不会提交、不伪造输出";
@@ -677,33 +902,54 @@ async function refreshEngines() {
   els.enginePill.textContent = `${state.engineId} · ${label}`;
   els.enginePill.className = "pill " + (current && current.state === "ready" ? "ok" : current && current.state === "failed" ? "bad" : "");
   const hint = $("engine-mode-hint");
-  if (hint) hint.textContent = engineModeHint(modality);
+  if (hint) hint.textContent = engineModeHint(state.mode);
   els.engineState.textContent = current ? (current.message || label) : label;
 }
 
-/* 与桌面端 app/ui/widgets/param_panel.py ENGINE_MODE_HINTS 同一份口径：
-   视频档的 2021MB 是真机实测；图片 / 音乐档的 6GB 是设计预期，尚未实测（验收看
-   任务元数据里的 peak_vram_mb），文案里必须写清楚，不许冒充实测。 */
-function engineModeHint(modality) {
-  if (modality === "music") {
+/* 与桌面端 app/ui/widgets/param_panel.py ENGINE_MODE_HINTS 同一份口径，按板块分四段
+   （t2i / i2i / video / music）：文生图（sana-multiling，Sana-1.6B 多语言版）与
+   图生图（wan-i2i，VACE 参考重绘）现在是两个不同的引擎、两个运行环境，必须分开讲，
+   不能再用一段「图片」混着说。
+   视频档的 2021MB 是真机实测；文生图 / 图生图 / 音乐档的 6GB 峰值都是设计预期，尚未实测
+   （验收看任务元数据里的 peak_vram_mb），文案里必须写清楚，不许冒充实测。
+   引擎说明将来进 i18n：词典的 key 就是界面上那句中文，所以下面 t2i / i2i 两段一段就是一整句，
+   不做多段拼接，也不插动态片段，否则两端逐字一致和翻译都对不上。 */
+function modeHintKey(mode) {
+  /* 板块 → 引擎说明文案的键（与桌面端 param_panel.mode_hint_key 同一份口径）。 */
+  if (mode === "t2i") return "t2i";
+  if (mode === "i2i") return "i2i";
+  if (mode === "music") return "music";
+  return "video";
+}
+function engineModeHint(mode) {
+  const key = modeHintKey(mode);
+  if (key === "music") {
     return "ACE-Step 1.5（MIT，本地离线，无云端 API）：48kHz wav，带人声（中英文）或纯器乐，10-480 秒。"
       + "按 6GB 显存档位设计：5Hz 语言模型与 DiT 走 CPU 卸载，峰值显存为预期值（未实测，验收看任务元数据 peak_vram_mb）；"
       + "turbo 默认 8 步。权重在 models\\ace-step-1.5（约 9.4GB，占物理内存），首次加载 1-3 分钟。"
       + "与图片/视频共用 FIFO 串行队列。"
-      + `提交前本端会先把自己拉起的空闲引擎释放掉再实测空闲显存，空闲低于 ${MUSIC_FREE_FLOOR_MB}MB 会拦下提交并点名占用者。`;
+      /* 下面的 6144 就是本文件上面的 MUSIC_FREE_FLOOR_MB，与桌面端 param_panel 逐字一致；
+         改门槛数字要同时改两处，别只改一处。 */
+      + "提交前本端会先把自己拉起的空闲引擎释放掉再实测空闲显存，空闲低于 6144MB 会拦下提交并点名占用者。";
   }
-  if (modality === "image") {
-    return "Wan2.1-T2V-1.3B 单帧出图（Apache-2.0，本地离线）：wan-t2i 直接渲染 / wan-i2i 用 VACE 参考重绘，输出 PNG。"
-      + "与视频共用 .venv-video 与 models\\wan2.1 权重：bf16 + 逐层 CPU 卸载，按 6GB 显存档位设计"
-      + "（单帧 token 约为 81 帧视频的 1/13，预期峰值低于视频档的实测 2021MB，图片档本身尚未实测，验收看任务元数据 peak_vram_mb）；"
-      + "逐层卸载需约 16GB 空闲物理内存。分辨率停在 480p 档（宽高 16 的倍数，超预算引擎会自动缩到档位上限），一次 1 张。"
-      + `提交前本端会先把自己拉起的空闲引擎与大模型释放掉再实测空闲显存，空闲低于 ${VIDEO_FREE_FLOOR_MB}MB 会拦下提交并点名是哪个程序占着显存；`
-      + "要手动清可以跑 scripts\\release_local_engine.bat。";
+  if (key === "t2i") {
+    /* 规格 2.1 逐字；源码里每处路径写两个反斜杠，界面上显示出来是一个。 */
+    return "Sana-1.6B 多语言版（Apache-2.0；文本编码器是 Gemma-2-2B-IT，受 Gemma Terms of Use 约束；本地离线推理，无云端 API）：文生图引擎 sana-multiling，输出 PNG。中文、英文、中英混合与 Emoji 提示词原生支持（模型卡原文声明 it supports Emoji, Chinese and English and all mixed prompts），不做任何翻译改写，提示词原样进编码器。按 6GB 显存档位设计：fp16 三件权重（编码器 4.99GB / Linear-DiT 3.06GB / DC-AE VAE 1.19GB）走逐模块 CPU 换入，任一时刻显存里只有当前那一件，峰值按最大单件加激活压在 6GB 内——这是按权重体积推算的预期值，尚未真机实测，验收看任务元数据 peak_vram_mb；空闲显存低于约 5GB 会自动退到逐层换入（峰值更低、慢两三倍），低于约 1500MB 会点名占用者并明确拒绝，不会硬扛 OOM。加载权重需要约 16GB 空闲物理内存，不足会在加载前拦截。分辨率必须按 32 的倍数（DC-AE 32 倍下采样），单遍上限约 1.10MP（1024 级直出）；超过单遍预算走「预算内出底图 + Lanczos 放大」，1080p 就是这条路径，元数据里如实标 upscaled=true、tiles=0，不谎称高清重绘。CFG 固定 4.5、不是用户参数，所以界面上没有 CFG 滑杆。权重在 models\\sana-multiling（约 9.3GB，只含 fp16 变体），缺失时用 scripts\\download_sana_weights.py 补。出图前先释放本机 LLM 引擎占的显存（scripts\\release_local_engine.bat）。与视频/音乐共用 FIFO 串行队列，一次 1 张。";
   }
-  return "Wan2.1 1.3B（Apache-2.0，本地离线）：文生视频 wan-t2v / 图生视频 wan-i2v（VACE），导出 16fps mp4，"
-    + "分辨率最高约 480p（约 0.46MP，要 1080p 需要另配超分或更大的模型），与智能体排的任务共用 FIFO 串行队列。"
-    + "显存按 6GB 档位设计：bf16 权重 + 逐层 CPU 卸载，真机实测单卡峰值约 2GB；逐层卸载还需要约 16GB 空闲物理内存。"
-    + `提交前本端会先把自己拉起的空闲引擎与大模型释放掉再实测空闲显存，空闲低于 ${VIDEO_FREE_FLOOR_MB}MB 会拦下提交并点名是哪个程序占着显存；`
+  if (key === "i2i") {
+    /* 规格 2.2 逐字；同上，路径在源码里是两个反斜杠。 */
+    return "Wan2.1-VACE-1.3B 参考重绘（Apache-2.0，本地离线推理，无云端 API）：图生图引擎 wan-i2i，必须上传参考图，输出 PNG。文本编码器 UMT5-XXL 原生支持中英文提示词。与视频引擎共用 .venv-video 与 models\\wan2.1 权重：bf16 + 逐层 CPU 卸载 + VAE tiling，视频档真机实测峰值 2021MB；单帧的 token 约为 81 帧视频的 1/13，图生图档峰值预期低于该实测值（尚未实测，验收看任务元数据 peak_vram_mb）；逐层卸载需要约 16GB 空闲物理内存。分辨率停在 480p 档（宽高 16 的倍数，约 0.46MP 像素预算）；超预算「不会自动降档」，提交前会被挡下并给出这一比例的最大可用档位。要 1024 级的高像素出图请用「文生图」板块（Sana 多语言版）。";
+  }
+  return "Wan2.1 1.3B（Apache-2.0，本地离线）：文生视频 wan-t2v / 图生视频 wan-i2v（VACE），导出 16fps mp4，帧数 5-161（自动取 4n+1）。"
+    + "分辨率停在 480p 档（宽高 16 的倍数，约 0.46MP 像素预算），1.3B 档最高约 480p，要 1080p 得另配超分或更大的模型。"
+    + "按 6GB 显存档位设计：bf16 + 逐层 CPU 卸载，真机实测峰值 2021MB，起跑只需约 1500MB 空闲显存；逐层卸载还需要约 16GB 空闲物理内存。"
+    + "档位钉死：显存上限由 DiT token 数决定（宽/16 × 高/16 × 压缩帧数，压缩帧数 =（帧数-1)/4+1，上限 20000），"
+    + "超线的组合不会自动降分辨率也不会偷改帧数，而是在提交前就被挡下，提示里写清保持分辨率的最长帧数与保持帧数的最大分辨率"
+    + "（面板上实时显示当前档位的这两个上限）。"
+    + "与智能体排的任务共用 FIFO 串行队列。"
+    /* 下面的 2000 就是本文件上面的 VIDEO_FREE_FLOOR_MB，与桌面端 param_panel 逐字一致；
+       改门槛数字要同时改两处，别只改一处。 */
+    + "提交前本端会先把自己拉起的空闲引擎与大模型释放掉再实测空闲显存，空闲低于 2000MB 会拦下提交并点名是哪个程序占着显存；"
     + "要手动清可以跑 scripts\\release_local_engine.bat。";
 }
 
@@ -832,31 +1078,39 @@ function tileSizeRatio(rec, batch) {
 }
 
 function renderVideoTile(tile, rec, files) {
-  for (const f of files) {
-    if (isVideoUrl(f.url)) {
-      const v = el("video");
-      v.controls = true; v.muted = true; v.loop = true; v.preload = "metadata";
-      v.src = f.url;
-      tile.appendChild(v);
-    } else if (/\.(png|jpe?g|webp)$/i.test(f.url)) {
-      const img = el("img", "frame");
-      img.loading = "lazy"; img.src = f.url; img.alt = "首帧";
-      tile.appendChild(img);
-    }
+  const vid = files.find((f) => isVideoUrl(f.url));
+  const frame = files.find((f) => /\.(png|jpe?g|webp)$/i.test(f.url || ""));
+  if (vid) {
+    /* 有视频就只渲染视频：封面用引擎写出来的首帧当 poster。以前 mp4 和封面 png
+       会一起贴进卡片，同一帧画两遍，还挤掉了视频本体。 */
+    const v = el("video");
+    v.controls = true; v.muted = true; v.loop = true; v.preload = "metadata";
+    v.src = vid.url;
+    if (frame) v.poster = frame.url;
+    v.dataset.task = rec.task_id;
+    tile.appendChild(v);
+  } else if (frame) {
+    const img = el("img", "frame");
+    img.loading = "lazy"; img.src = frame.url; img.alt = "首帧";
+    img.dataset.task = rec.task_id;
+    tile.appendChild(img);
   }
   const p = rec.parameters || {};
   const frames = Number(p.num_frames) || 0;
   tile.appendChild(el("div", "tile-foot",
     `seed ${p.seed ?? "—"} · ${p.width ?? "?"}×${p.height ?? "?"} · ${frames ? `${(frames / VIDEO_FPS).toFixed(2)}s @16fps` : "时长?"}`));
-  const vid = files.find((f) => isVideoUrl(f.url));
   if (vid) {
     const a = el("a", "vu dl", "⬇下载视频");
     a.href = vid.url + (vid.url.includes("?") ? "&" : "?") + "download=1";
     a.download = vid.name || "辰鹄视频.mp4";
     const acts = el("div", "tile-acts");
+    /* 「⛶」= 在灯箱里开大播放器（对应桌面端的「▶ 播放」窗）；双击视频同样是这个动作。
+       纯图形按钮：不新增要翻译的文案，跟 ✕ / ‹ / 📁 这类图标按钮一致。 */
+    const btnBig = el("button", "vu", "⛶");
+    btnBig.dataset.act = "enlarge"; btnBig.dataset.task = rec.task_id;
     const btnSave = el("button", "vu"); btnSave.innerHTML = "<b>⬇</b>另存到硬盘";
     btnSave.dataset.act = "save"; btnSave.dataset.task = rec.task_id;
-    acts.append(a, btnSave);
+    acts.append(btnBig, a, btnSave);
     tile.appendChild(acts);
   }
   const note = savedCopiesNode(rec);
@@ -1010,20 +1264,26 @@ async function imagine() {
     return; // imagineMusic 自行处理显存检查、边界确认、提交与提示
   }
   if (modality === "video" || modality === "image") {
+    /* 文生图 = sana-multiling（独立 .venv-image 与 models\sana-multiling）；
+       图生图与视频 = Wan2.1 那一套（.venv-video 与 models\wan2.1）。显存门槛两端同一档位。 */
     const want = modality;
-    const label = modality === "video" ? "视频" : "图片";
+    const label = modality === "video" ? "视频" : state.mode === "t2i" ? "文生图" : "图生图";
+    const engineLabel = state.mode === "t2i" ? "Sana-1.6B 多语言版" : "Wan2.1";
+    const engineFix = state.mode === "t2i"
+      ? "需 .venv-image（torch cu130 + diffusers + transformers，可用 scripts\\verify_env.py 自检）与 models\\sana-multiling 权重（运行 scripts\\download_sana_weights.py，Apache-2.0）"
+      : "需 .venv-video（运行 scripts\\setup_video_venv.ps1）与 models\\wan2.1 权重（运行 scripts\\download_video_weights.py，Apache-2.0）";
     if (!state.engines.some((e) => (ENGINE_TASK_TYPES[e.engine_id] || []).includes(want))) {
-      showToast(`Wan2.1 ${label}引擎未注册：需 .venv-video（运行 scripts\\setup_video_venv.ps1）与 models\\wan2.1 权重（运行 scripts\\download_video_weights.py，Apache-2.0）；未就绪前不会提交任务，也不会伪造输出。`, "error");
+      showToast(`${engineLabel} ${label}引擎未注册：${engineFix}；未就绪前不会提交任务，也不会伪造输出。`, "error");
       return;
     }
     let vhw = null;
     try { vhw = await api("/api/hardware"); } catch { /* 探测失败不误判，交由后端 health_check 兜底 */ }
     if (vhw && !vhw.gpu) {
-      showToast(`显存不足，无法启动 Wan2.1 ${label}模型：检测不到 NVIDIA 显卡（最低要求 6GB 显存档位）。`, "error");
+      showToast(`显存不足，无法启动 ${engineLabel} ${label}模型：检测不到 NVIDIA 显卡（最低要求 6GB 显存档位）。`, "error");
       return;
     }
     if (vhw && vhw.gpu && vhw.gpu.memory_total_mb < VIDEO_MIN_VRAM_MB) {
-      showToast(`显存不足，无法启动 Wan2.1 ${label}模型：显卡 ${vhw.gpu.name || "?"} 仅 ${vhw.gpu.memory_total_mb} MB，最低要求 ${VIDEO_MIN_VRAM_MB} MB（6GB 档）。`, "error");
+      showToast(`显存不足，无法启动 ${engineLabel} ${label}模型：显卡 ${vhw.gpu.name || "?"} 仅 ${vhw.gpu.memory_total_mb} MB，最低要求 ${VIDEO_MIN_VRAM_MB} MB（6GB 档）。`, "error");
       return;
     }
     const vFloor = await vramFloorCheck(VIDEO_FREE_FLOOR_MB);
@@ -1031,7 +1291,7 @@ async function imagine() {
       const gave = vFloor.released && vFloor.released.length
         ? `本端已经先把自己拉起的空闲引擎释放掉了（${vFloor.released.join("、")}）；`
         : "本端没有可释放的空闲引擎；";
-      showToast(`显存不足，无法启动 Wan2.1 ${label}模型：按进程实测还能用的空闲显存只有 ${vFloor.free} MB（6GB 档起跑需约 ${VIDEO_FREE_FLOOR_MB} MB 空闲）。${gave}显存目前主要被 ${vFloor.holders || "别的程序"} 占着——退出占显存的程序再提交。（这里不是按 nvidia-smi 的「已用」算的：Windows 上那个数把驱动保留的、以及已经结束还没回收的进程也算进去，明显偏大。）`, "error");
+      showToast(`显存不足，无法启动 ${engineLabel} ${label}模型：按进程实测还能用的空闲显存只有 ${vFloor.free} MB（6GB 档起跑需约 ${VIDEO_FREE_FLOOR_MB} MB 空闲）。${gave}显存目前主要被 ${vFloor.holders || "别的程序"} 占着——退出占显存的程序再提交。（这里不是按 nvidia-smi 的「已用」算的：Windows 上那个数把驱动保留的、以及已经结束还没回收的进程也算进去，明显偏大。）`, "error");
       return;
     }
   }
@@ -1039,7 +1299,7 @@ async function imagine() {
   let extraParams = {};
   if (state.ref) {
     const path = state.ref.path.trim();
-    if (!path) { showToast("参考图需要本机完整路径（浏览器拿不到剪贴板图片的磁盘路径）。填路径后再提交，或点 ✕ 取消引用。", "error"); return; }
+    if (!path) { showToast("参考图需要本机完整路径。填路径后再提交，或点 ✕ 取消引用。", "error"); return; }
     if (!/^[A-Za-z]:[\\/]/.test(path)) { showToast("参考图路径必须是盘符开头的绝对路径，例如 D:\\ChenguAI\\uploads\\photo.png", "error"); return; }
     const shapeError = refShapeError(path);
     if (shapeError) { showToast(shapeError, "error"); return; }
@@ -1061,6 +1321,17 @@ async function imagine() {
     const session = ensureSession(text);
     if (modality === "video") {
       const vparams = collectVideoParams(refPath);
+      /* 提交前先把档位账算清：超线就不排队，直接把这一档的真实上限讲成具体数字，
+         不让用户白试一次。图生视频的目标尺寸由首帧比例决定（浏览器读不到本机图片的
+         尺寸），这一路交给后端按首帧真实尺寸判定（同一份 budget.py），越线返回 400
+         并带同样的具体数字，也不会进队列。 */
+      if (state.mode === "t2v") {
+        const report = budgetReport(vparams.width, vparams.height, vparams.num_frames);
+        if (!report.ok) {
+          showToast(budgetProblemText(report), "error");
+          return;   // finally 会恢复按钮，不写批次、不排队
+        }
+      }
       const vbatch = { id: uid(), kind: "video", mode: state.mode, prompt: text, time: formatTime(new Date().toISOString()), refPath, params: vparams, taskIds: [] };
       session.batches.push(vbatch);
       try {
@@ -1081,7 +1352,7 @@ async function imagine() {
       els.feed.scrollTop = els.feed.scrollHeight;
       return; // finally 会恢复按钮
     }
-    const base = collectImageParams(refPath); // 单帧档：一次 1 张，参数不带 num_frames / strength
+    const base = collectImageParams(refPath); // 图片档一次 1 张：参数不带 num_frames / strength（文生图 Sana、图生图 Wan 单帧档）
     const fullPrompt = text; // 风格标签已直接内联进提示词，不再另行追加
     const batch = {
       id: uid(), kind: "imagine", mode: state.mode, prompt: text,
@@ -1094,9 +1365,11 @@ async function imagine() {
       batch.taskIds.push(rec.task_id);
       // 立刻把刚排队的任务放进本地缓存，卡片当场出现「排队中」，不用等下一次轮询。
       state.tasks.set(rec.task_id, rec);
-      showToast(refPath
+      /* 排队提示按板块分：文生图是 Sana-1.6B 多语言版（规格 2.3），图生图仍是 Wan VACE 单帧档。
+         按板块判断而不是按「有没有挂垫图」判断，图生图没挂上路径时也不会串成文生图的提示。 */
+      showToast(state.mode === "i2i"
         ? "图生图已排队：Wan2.1-VACE 按垫图参考重绘（单帧 PNG，480p 档），首次生成需加载权重，通常数分钟"
-        : "文生图已排队：Wan2.1-T2V-1.3B 单帧渲染（PNG，480p 档），首次生成需加载权重，通常数分钟", "success");
+        : "文生图已排队：Sana-1.6B 多语言版（PNG，1024 级直出，超预算按底图+放大），首次生成需加载权重，通常数分钟", "success");
     } catch (error) {
       showToast(`图片提交失败：${error.message}`, "error");
     }
@@ -1232,34 +1505,51 @@ async function upscale(taskId) {
   const src = upscaleSourceRecord(taskId);
   if (!src) return;
   const p = src.rec.parameters || {};
-  /* U 不再是超分模型，而是把原图当参考图交给 Wan VACE 按更大画布重绘补细节。
-     尺寸按 16 的倍数放 1.34 倍，并夹回 Wan 的 480p 档像素预算（VIDEO_MAX_PIXELS）。 */
-  const w0 = Number(p.width) || 832, h0 = Number(p.height) || 480;
-  let w = clampInt(w0 * 1.34 / 16, 16, 4096) * 16, h = clampInt(h0 * 1.34 / 16, 16, 4096) * 16;
-  if (w * h > VIDEO_MAX_PIXELS) {
-    const f = Math.sqrt(VIDEO_MAX_PIXELS / (w * h));
-    w = clampInt(w * f / 16, 256, 4096) * 16;
-    h = clampInt(h * f / 16, 256, 4096) * 16;
+  /* 「放大」按源图出自哪个引擎分两条真能跑的路，与桌面端 creation_page.upscale() 同口径：
+     文生图（sana-multiling）不接受垫图 → 同提示词同 seed 按更大目标尺寸重新出图；超出
+     IMAGE_T2I_MAX_PIXELS 单遍预算时引擎按预算出底图再 Lanczos 放大到目标尺寸
+     （元数据 upscaled=true）。口径＝32 的倍数（DC-AE 32 倍下采样）、边长 320-2048、
+     目标不超过 IMAGE_T2I_MAX_TARGET_PIXELS（2048 级那档）。
+     图生图（wan-i2i）与 2026-11-10 已下架的老文生图记录 → 图生图参考重绘：16 的倍数、
+     VIDEO_MAX_PIXELS（480p 档）预算，超了就等比缩回。
+     引擎按源图点名，不取当前板块的 state.settings.vengine：在视频板块点图片卡片的
+     「放大」会把图片任务派给 wan-t2v，或把垫图塞给 sana-multiling，两边都会被引擎拒绝。 */
+  const fromSana = (src.rec.engine_id || "") === "sana-multiling";
+  const engineId = fromSana ? "sana-multiling" : "wan-i2i";
+  const mult = fromSana ? IMAGE_T2I_MULTIPLE : 16;
+  const lo = fromSana ? IMAGE_T2I_MIN_SIDE : 256;
+  const hi = fromSana ? IMAGE_T2I_MAX_SIDE : VIDEO_MAX_SIDE;
+  const budget = fromSana ? IMAGE_T2I_MAX_TARGET_PIXELS : VIDEO_MAX_PIXELS;
+  const w0 = Number(p.width) || (fromSana ? 1024 : 832), h0 = Number(p.height) || (fromSana ? 1024 : 480);
+  const align = (v) => clampInt(v / mult, lo / mult, hi / mult) * mult;
+  let w = align(w0 * 1.34), h = align(h0 * 1.34);
+  if (w * h > budget) {
+    const f = Math.sqrt(budget / (w * h));
+    w = align(w * f); h = align(h * f);
   }
   if (w <= w0 && h <= h0) {
-    showToast("原图已在 480p 档像素预算上限附近，Wan 无法再放大（要更大尺寸需要超分或更大的模型）", "error");
+    showToast(fromSana
+      ? `源图 ${w0}×${h0} 已在 Sana 的目标硬上限（约 ${Math.round(budget / 1000)}K 像素，2048 级）附近，Sana 档无法再放大；要更大尺寸得另配超分或更大模型`
+      : `源图 ${w0}×${h0} 已在 480p 档像素预算（约 ${Math.round(budget / 1000)}K 像素）上限附近，Wan 档无法再放大；要更大尺寸得另配超分或更大模型`, "error");
     return;
   }
   const params = {
-    width: w, height: h, steps: Number(p.steps) || 28,
-    init_image_path: src.file.path,
+    width: w, height: h, steps: Number(p.steps) || (fromSana ? 20 : 28),
     seed: Number.isInteger(p.seed) ? p.seed : randSeed(),
   };
+  if (!fromSana) params.init_image_path = src.file.path; // 只有 wan-i2i 吃垫图，Sana 拒绝输入图片
   if (p.negative_prompt) params.negative_prompt = p.negative_prompt;
   const session = ensureSession(src.rec.prompt);
-  const batch = { id: uid(), kind: "upscale", mode: "i2i", prompt: src.rec.prompt, time: formatTime(new Date().toISOString()), params, taskIds: [] };
+  const batch = { id: uid(), kind: "upscale", mode: fromSana ? "t2i" : "i2i", prompt: src.rec.prompt, time: formatTime(new Date().toISOString()), params, taskIds: [] };
   session.batches.push(batch);
   try {
-    const rec = await submitTask(src.rec.prompt, params, "image", state.settings.vengine);
+    const rec = await submitTask(src.rec.prompt, params, "image", engineId);
     batch.taskIds.push(rec.task_id);
     state.tasks.set(rec.task_id, rec);
     persist(); renderFeed(true);
-    showToast(`放大任务已排队：Wan VACE 参考重绘补细节（${w}×${h}，480p 档像素预算内）`, "success");
+    showToast(fromSana
+      ? `放大任务已排队：Sana-1.6B 同提示词同 seed 按更大尺寸重新出图（${w}×${h}；按 32 的倍数、单边不超过 2048；超过 1024 级单遍预算 ${Math.round(IMAGE_T2I_MAX_PIXELS / 1000)}K 像素时引擎按预算出底图再放大到目标尺寸，元数据 upscaled=true）`
+      : `放大任务已排队：Wan VACE 参考重绘补细节（${w}×${h}，480p 档像素预算内）`, "success");
   } catch (error) { showToast(`放大提交失败：${error.message}`, "error"); }
 }
 
@@ -1267,25 +1557,33 @@ async function variation(taskId) {
   const src = upscaleSourceRecord(taskId); // 与 U 相同的取源逻辑
   if (!src) return;
   const p = src.rec.parameters || {};
+  // 变体 = 换 seed 再走一遍：文生图（sana-multiling）源图按原尺寸重新出图（不接受垫图，
+  // 换 seed 本身就是新构图）；图生图与 2026-11-10 已下架的老文生图记录拿源图当垫图走 wan-i2i 参考重绘。
+  const fromSana = (src.rec.engine_id || "") === "sana-multiling";
+  const engineId = fromSana ? "sana-multiling" : "wan-i2i";
   const session = ensureSession(src.rec.prompt);
-  const batch = { id: uid(), kind: "variation", mode: "i2i", prompt: src.rec.prompt, time: formatTime(new Date().toISOString()), params: p, taskIds: [] };
+  const batch = { id: uid(), kind: "variation", mode: fromSana ? "t2i" : "i2i", prompt: src.rec.prompt, time: formatTime(new Date().toISOString()), params: p, taskIds: [] };
   session.batches.push(batch);
   try {
-    // 串行队列 + 6GB 档：一次只排 1 张 VACE 参考重绘变体（旧 SD 时代的 4 连发会堵死队列）
+    // 串行队列 + 6GB 档：一次只排 1 张（旧 SD 时代的 4 连发会堵死队列），无 strength 参数
     const params = {
-      width: Number(p.width) || 832, height: Number(p.height) || 480,
-      steps: Number(p.steps) || 28,
-      init_image_path: src.file.path,
-      seed: randSeed(),
+      width: Number(p.width) || (fromSana ? 1024 : 832), height: Number(p.height) || (fromSana ? 1024 : 480),
+      steps: Number(p.steps) || (fromSana ? 20 : 28),
+      // seed 规则与桌面端逐字一致：源任务有整数 seed 就 +1（可复现的变体链），
+      // 没有就发一个新随机 seed。绝不能沿用源 seed——那等于把同一张图重排一遍。
+      seed: Number.isInteger(Number(p.seed)) ? Number(p.seed) + 1 : randSeed(),
     };
+    if (!fromSana) params.init_image_path = src.file.path; // 只有 wan-i2i 吃垫图
     if (p.negative_prompt) params.negative_prompt = p.negative_prompt;
     batch.params = params;
-    const rec = await submitTask(src.rec.prompt, params, "image", state.settings.vengine);
+    const rec = await submitTask(src.rec.prompt, params, "image", engineId);
     batch.taskIds.push(rec.task_id);
     state.tasks.set(rec.task_id, rec);
     persist();
     renderFeed(true);
-    showToast("变体任务已排队（Wan VACE 参考重绘，1 张）", "success");
+    showToast(fromSana
+      ? "变体任务已排队（Sana-1.6B 同提示词换 seed 重新出图，1 张）"
+      : "变体任务已排队（Wan VACE 参考重绘，1 张）", "success");
   } catch (error) { showToast(`变体提交失败：${error.message}`, "error"); }
 }
 
@@ -1410,7 +1708,7 @@ function setRef(file) {
   const guess = state.settings.refDir ? `${state.settings.refDir}\\${name}` : "";
   state.ref = { previewUrl: URL.createObjectURL(file), name, path: guess };
   renderRefChip();
-  showToast("参考图已载入预览。确认/修正路径即可提交（目录已自动记住；浏览器无法读取剪贴板图片的真实磁盘路径，V/U 从已生成图走图生图不受此限）。", "success");
+  showToast("参考图已载入预览。确认/修正路径即可提交（目录已自动记住；浏览器无法读取剪贴板图片的真实磁盘路径）。", "success");
 }
 
 function clearRef() {
@@ -1439,7 +1737,7 @@ function renderRefChip() {
   input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); els.prompt.focus(); } });
   const note = el("span", "note", MODALITY[state.mode] === "video"
     ? "该文件将作为 init_image_path 首帧，视频从它开始运动"
-    : "强度用左侧「重绘强度」滑块调节（默认 0.6）");
+    : "垫图只作参考重绘的参照，改动幅度由提示词决定（图生图引擎没有「重绘强度」这个参数）");
   const close = el("button", "icon-btn", "✕");
   close.addEventListener("click", clearRef);
   els.refChip.append(img, el("span", "muted", state.ref.name), input, note, close);
@@ -1485,13 +1783,37 @@ function renderLightbox() {
   if (!lb) return;
   const rec = state.tasks.get(lb.ids[lb.idx]);
   if (!rec || !rec.output_files[0]) return;
-  const file = rec.output_files[0];
-  $("lb-img").src = file.url;
+  const file = mainArtifact(rec) || rec.output_files[0];
+  const isVid = isVideoUrl(file.url);
+  const img = $("lb-img");
+  const movie = $("lb-video");
+  /* 换页/换类型前先把上一段停掉：藏起来的 <video> 照样在出声，切到图片听着很怪。 */
+  movie.pause();
+  img.classList.toggle("hidden", isVid);
+  movie.classList.toggle("hidden", !isVid);
+  /* V 变化和 U 放大只对图片有意义：视频卡片上本来也没有这两个动作。 */
+  $("lb-v").classList.toggle("hidden", isVid);
+  $("lb-u").classList.toggle("hidden", isVid);
+  if (isVid) {
+    movie.src = file.url;
+    const frame = (rec.output_files || []).find((f) => /\.(png|jpe?g|webp)$/i.test(f.url || ""));
+    if (frame) movie.poster = frame.url;
+    else movie.removeAttribute("poster");
+    /* 点开卡片本身是用户手势，通常能直接播；被浏览器拦下就让用户按播放键。 */
+    movie.play().catch(() => {});
+  } else {
+    img.src = file.url;
+  }
   const save = $("lb-save");
   save.href = file.url;
-  save.download = file.name || "辰鹄图片.png";
+  save.download = file.name || (isVid ? "辰鹄视频.mp4" : "辰鹄图片.png");
   const p = rec.parameters || {};
-  $("lb-meta").textContent = `${rec.prompt}\n${p.width ?? "?"}×${p.height ?? "?"} · steps ${p.steps ?? "?"} · seed ${p.seed ?? "随机"}${p.init_image_path ? " · img2img" : ""} · ${formatTime(rec.finished_at)}`;
+  const frames = Number(p.num_frames) || 0;
+  const stamp = ` · ${formatTime(rec.finished_at)}`;
+  const head = `${rec.prompt}\n${p.width ?? "?"}×${p.height ?? "?"}`;
+  $("lb-meta").textContent = isVid
+    ? `${head} · ${frames ? `${(frames / VIDEO_FPS).toFixed(2)}s @${VIDEO_FPS}fps` : "时长?"} · seed ${p.seed ?? "随机"}${p.init_image_path ? " · img2vid" : ""}${stamp}`
+    : `${head} · steps ${p.steps ?? "?"} · seed ${p.seed ?? "随机"}${p.init_image_path ? " · img2img" : ""} · ${formatTime(rec.finished_at)}`;
   $("lb-meta").style.whiteSpace = "pre-wrap";
   $("lb-prev").classList.toggle("hidden", lb.ids.length < 2);
   $("lb-next").classList.toggle("hidden", lb.ids.length < 2);
@@ -1499,6 +1821,11 @@ function renderLightbox() {
 
 function closeLightbox() {
   state.lightbox = null;
+  const movie = $("lb-video");
+  movie.pause();
+  /* 关掉就把源卸掉：不这么做，解码器和音频会一直留着。 */
+  movie.removeAttribute("src");
+  movie.load();
   $("lightbox").classList.add("hidden");
 }
 
@@ -1563,12 +1890,15 @@ function bindEvents() {
   $("toggle-settings").addEventListener("click", () => { document.body.classList.toggle("settings-hidden"); persist(); });
   $("close-settings").addEventListener("click", () => { document.body.classList.add("settings-hidden"); persist(); });
 
-  /* 尺寸（图片 / 视频共用一组控件，绑到当前模式参数桶；480p 档按 16 的倍数） */
-  const bindSize = (rangeId, numId, key, sync, lo, hi, step) => {
+  /* 尺寸（图片 / 视频共用一组控件，绑到当前模式参数桶）。范围与倍数按板块现取现用：
+     文生图（Sana）320-2048 / 步进 32，图生图与视频（Wan）256-1024 / 步进 16，
+     所以 lo/hi/step 不能写死在绑定参数里，只能在事件里读 sizeLimits(state.mode)。 */
+  const bindSize = (rangeId, numId, key, sync) => {
     $(rangeId).addEventListener("input", () => { state.p[key] = Number($(rangeId).value); sync(); persist(); });
     $(numId).addEventListener("change", () => {
-      const v = clampInt(Number($(numId).value) || lo, lo, hi);
-      state.p[key] = Math.round(v / step) * step;
+      const lim = sizeLimits(state.mode);
+      const v = clampInt(Number($(numId).value) || lim.lo, lim.lo, lim.hi);
+      state.p[key] = Math.round(v / lim.step) * lim.step;
       sync(); persist();
     });
   };
@@ -1579,8 +1909,8 @@ function bindEvents() {
     state.p.height = Number(chip.dataset.h);
     syncVideoSize(); persist();
   });
-  bindSize("vwidth-range", "vwidth-num", "width", syncVideoSize, 256, 832, 16);
-  bindSize("vheight-range", "vheight-num", "height", syncVideoSize, 256, 832, 16);
+  bindSize("vwidth-range", "vwidth-num", "width", syncVideoSize);
+  bindSize("vheight-range", "vheight-num", "height", syncVideoSize);
 
   /* 视频帧数 / 音乐参数（BPM、目标时长、纯器乐、人声语言） */
   $("frames-range").addEventListener("input", () => { state.p.frames = snapFrames(Number($("frames-range").value)); syncFrames(); persist(); });
@@ -1672,6 +2002,11 @@ function bindEvents() {
       else if (act === "upscale") await upscale(task);
       else if (act === "variation") await variation(task);
       else if (act === "save") await saveTaskArtifact(task);
+      else if (act === "enlarge") {
+        /* 「⛶」：把这条产物放进灯箱——图片是大图，视频是带控件的大播放器。 */
+        const host = actionEl.closest("[data-batch]");
+        if (host) openLightbox(host.dataset.batch, task);
+      }
       return;
     }
     const img = event.target.closest("img[data-task]");
@@ -1679,6 +2014,14 @@ function bindEvents() {
       const tile = img.closest("[data-batch]");
       openLightbox(tile.dataset.batch, img.dataset.task);
     }
+  });
+
+  /* 卡片里的视频：单击归播放器自己的控件，双击才开大播放器（也走「⛶」）。 */
+  els.feed.addEventListener("dblclick", (event) => {
+    const movie = event.target.closest("video[data-task]");
+    if (!movie) return;
+    const tile = movie.closest("[data-batch]");
+    if (tile) openLightbox(tile.dataset.batch, movie.dataset.task);
   });
 
   /* Lightbox */
@@ -1696,7 +2039,7 @@ function bindEvents() {
     const lb = state.lightbox;
     const rec = lb ? state.tasks.get(lb.ids[lb.idx]) : null;
     const file = rec ? mainArtifact(rec) : null;
-    if (!file) { showToast("该结果没有可另存的产物", "error"); return; }
+    if (!file) { showToast("该任务还没有可另存的产物", "error"); return; }
     event.preventDefault();
     await saveArtifactToDisk(file);
   });
@@ -1723,8 +2066,9 @@ function bindEvents() {
   document.addEventListener("keydown", (event) => {
     if (!state.lightbox) return;
     if (event.key === "Escape") closeLightbox();
-    else if (event.key === "ArrowLeft") lbShift(-1);
-    else if (event.key === "ArrowRight") lbShift(1);
+    /* 焦点在播放器上时，左右键归播放器用（快进/快退），不再翻上一张/下一张。 */
+    else if (event.key === "ArrowLeft" && event.target !== $("lb-video")) lbShift(-1);
+    else if (event.key === "ArrowRight" && event.target !== $("lb-video")) lbShift(1);
   });
 }
 

@@ -1,22 +1,37 @@
 """共享的生成引擎注册逻辑（不依赖 Qt，桌面端与 Web 端共用）。
 
-真实引擎（视频 wan-t2v / wan-i2v，Wan2.1 1.3B + VACE-1.3B；图片 wan-t2i / wan-i2i，
-与视频共用同一套 Wan2.1 权重；音乐 ace-step-15，ACE-Step 1.5）运行在 .venv-video /
-.venv-music 的独立 worker 子进程里；主进程（桌面或 Web 服务器）只通过
+真实引擎（文生图 sana-multiling，Sana-1.6B 多语言版；图生图 wan-i2i 与视频 wan-t2v /
+wan-i2v，Wan2.1 1.3B + VACE-1.3B；音乐 ace-step-15，ACE-Step 1.5）运行在 .venv-image /
+.venv-video / .venv-music 的独立 worker 子进程里；主进程（桌面或 Web 服务器）只通过
 ProcessEngineAdapter 的 JSON-lines IPC 通信，因此主进程虚拟环境（.venv）不需要 torch/diffusers。
 
 2026-11-09 下架与重新选型记录：文生图 / 图生图（SD1.5 + RealVis V5.1）与 AI 音乐
 （ACE-Step 1.5）曾按「峰值显存不超过 6GB、大模型原生支持中英文 Prompt、权重可商用」
 三条要求整体下架。同日重新选型后恢复注册：
 - 图片改用 Wan2.1 1.3B 单帧生成（wan-t2i 文生图 / wan-i2i 图生图）：Apache-2.0、
-  文本编码器 UMT5-XXL 原生支持中英文、与视频引擎共用 models/wan2.1 权重（零新增下载），
-  显存策略与视频同一套（逐层换入；视频档真机实测峰值约 2GB，图片单帧 token 只有其零头，
-  图片档峰值预期更低但尚未真机实测，验收时补测）。FLUX.1-schnell 被否决：权重 23GB
-  体量过大，且 HF 上已是 gated 仓库（403）。
+  文本编码器 UMT5-XXL 原生支持中英文、与视频引擎共用 models/wan2.1 权重（零新增下载）。
+  FLUX.1-schnell 被否决：权重 23GB 体量过大，且 HF 上已是 gated 仓库（403）。
 - 音乐保留 ACE-Step 1.5（MIT、原生中英文歌词）：LM 与 DiT 全部 CPU 换入，
   显存门槛从整机 12GB 降到 6GB 档（目标峰值 <6GB 为预期值，未实测，验收时补测；
   空闲显存不足时引擎会诚实拒绝而不是硬扛 OOM）。
 已经生成过的历史记录与产物一直可读、可打开。
+
+2026-11-10 文生图再次换型（图生图与视频不变）：wan-t2i（Wan2.1 单帧出图）下架，
+文生图换成 Sana-1.6B 多语言版（HF 仓库 Efficient-Large-Model/Sana_1600M_1024px_MultiLing_diffusers）。
+三条硬标准的取证全部来自 huggingface.co 原始仓库与模型卡原文：
+- 可商用：license=apache-2.0、gated=false；编码器 Gemma-2-2B-IT 受 Gemma Terms of Use
+  约束（允许商用），且权重已内置在本仓库 text_encoder/ 下，不需要登录 Google 的受限仓库；
+- 中英文：模型卡原文「it supports Emoji, Chinese and English and all mixed prompts」，
+  中文提示词直接进编码器，不再需要 SD1.5/CLIP 那层中英翻译桥接；
+- 峰值显存 ≤6GB：fp16 三件（编码器 4.99GB / DiT 3.06GB / DC-AE VAE 1.19GB）走逐模块换入，
+  任一时刻显存里只有当前那一件，峰值按最大单件 + 激活估算压在 6GB 内；空闲显存更小时
+  自动退到逐层换入（峰值一两 GB、慢两三倍）。**这个峰值是按权重体积推算的预期值，
+  尚未真机实测**；每次生成的元数据里带 peak_vram_mb 实测值，验收时核对，不伪造。
+当天被否决的候选（均取自原始仓库）：Kolors（README 原文要求商用需填问卷申请，16.6GB）、
+Chroma1-HD（42.19GB、基于 FLUX.1-schnell）、CogView4-6B（Apache-2.0 且中英双语，但 28.99GB）、
+HunyuanDiT（license:other 带条件授权）、Janus-Pro-1B（README 声明受 DeepSeek Model License 约束）。
+同日的 wan-t2i 也一并下架：它本质是视频引擎的单帧副作用，分辨率受 480p 视频档像素预算限制，
+已被专用文生图模型取代。图生图仍走 wan-i2i（VACE-1.3B，Apache-2.0、UMT5 原生双语、已在盘上）。
 """
 
 from __future__ import annotations
@@ -39,10 +54,22 @@ GENERATION_REQUEST_TIMEOUT_SECONDS = 4200.0
 
 VIDEO_T2V_ENGINE_ID = "wan-t2v"
 VIDEO_I2V_ENGINE_ID = "wan-i2v"
-# 图片引擎与视频共用 Wan2.1 1.3B 权重：wan-t2i = 单帧文生图；wan-i2i = VACE 参考图生图
-IMAGE_T2I_ENGINE_ID = "wan-t2i"
+# 文生图（2026-11-10 换型）：Sana-1.6B 多语言版，独立 .venv-image + models/sana-multiling；
+# 图生图保留 wan-i2i（VACE-1.3B 参考重绘），与视频共用 .venv-video 与 models/wan2.1，零新增下载。
+IMAGE_T2I_ENGINE_ID = "sana-multiling"
 IMAGE_I2I_ENGINE_ID = "wan-i2i"
 MUSIC_ENGINE_ID = "ace-step-15"
+
+
+def default_image_venv_python() -> Path:
+    """默认的文生图引擎虚拟环境解释器（项目根目录下的 .venv-image）。"""
+    project_root = Path(__file__).resolve().parents[1]
+    return project_root / ".venv-image" / "Scripts" / "python.exe"
+
+
+def default_image_model_dir() -> Path:
+    """默认的 Sana 权重目录（项目内 models/sana-multiling，HF 缓存布局，只含 fp16 变体）。"""
+    return Path(__file__).resolve().parents[1] / "models" / "sana-multiling"
 
 
 def default_video_venv_python() -> Path:
@@ -151,11 +178,11 @@ def register_production_engines(
     paths: AppPaths,
     logger: logging.Logger,
 ) -> None:
-    """按配置注册真实引擎（视频 wan-t2v / wan-i2v、图片 wan-t2i / wan-i2i 共用
-    .venv-video worker；音乐 ace-step-15 走 .venv-music worker）。
+    """按配置注册真实引擎（文生图 sana-multiling 走 .venv-image worker；图生图 wan-i2i
+    与视频 wan-t2v / wan-i2v 共用 .venv-video worker；音乐 ace-step-15 走 .venv-music worker）。
 
     仅当 engines_enabled=true 时注册；默认关闭，避免在用户确认模型下载/许可之前
-    触发权重下载。主进程保持轻量——torch/diffusers 只存在于 .venv-video。
+    触发权重下载。主进程保持轻量——torch/diffusers 只存在于这几个引擎子环境里。
     """
     if not config.get("engines_enabled"):
         logger.info("真实生成引擎未启用（配置 engines_enabled=false），生成任务将保持排队校验后失败")
@@ -172,13 +199,7 @@ def register_production_engines(
     # 权重缺失时照常注册：worker 的 health_check 会诚实报告「权重缺失」并给出下载命令，
     # 不会下载、不会伪造输出。CHENGUAI_DISABLE_MODALITIES 含 video 时整段跳过。
     #
-    # ---- Wan2.1 图片引擎（wan-t2i 文生图 / wan-i2i 图生图，2026-11-09 重新选型）----
-    # 与视频引擎共用同一 .venv-video 与 models/wan2.1 权重，零新增下载：
-    # wan-t2i = T2V-1.3B num_frames=1 单帧出图；wan-i2i = VACE-1.3B reference_images
-    # 参考重绘。文本编码器 UMT5-XXL 原生支持中英文 Prompt。显存策略与视频同一套
-    # （bf16 + 逐层换入 + VAE tiling）：视频档真机实测峰值约 2GB，单帧 token 只有
-    # 其零头，图片档峰值预期更低（尚未真机实测，验收时用任务元数据里的
-    # peak_vram_mb 核对，不伪造数字）。
+    # 图生图 wan-i2i 也在这一套权重与 venv 上跑，注册代码见下面「图片引擎」那段。
     video_python_value = str(config.get("video_venv_python") or "").strip()
     video_python = Path(video_python_value) if video_python_value else default_video_venv_python()
     if video_python_value and not video_python.is_file():
@@ -220,38 +241,88 @@ def register_production_engines(
             video_python,
         )
 
+    # ---- 文生图 sana-multiling（Sana-1.6B 多语言版，2026-11-10 换型）----
+    # 独立 .venv-image 与 models/sana-multiling（fp16 变体约 9.3GB，走逐模块 CPU 换入）。
+    # 权重缺失时照常注册：worker 的 health_check 会诚实报告「权重缺失」并点名下载脚本，
+    # 不会自动下载、不会伪造输出。
+    image_python_value = str(config.get("image_venv_python") or "").strip()
+    image_python = Path(image_python_value) if image_python_value else default_image_venv_python()
+    if image_python_value and not image_python.is_file():
+        logger.warning(
+            "配置的 image_venv_python 不存在：%s；回退到项目默认环境 %s",
+            image_python,
+            default_image_venv_python(),
+        )
+        image_python = default_image_venv_python()
+    image_models = Path(str(config.get("image_model_dir") or default_image_model_dir()))
+
     # 图片引擎独立于 video 开关：显存检测禁用的是视频模态（81 帧序列），
-    # 单帧图片预算小得多；两者共享 worker 环境但各自可被 CHENGUAI_DISABLE_MODALITIES 禁用。
+    # 单张图片的预算小得多；两者各自可被 CHENGUAI_DISABLE_MODALITIES 禁用。
     if "image" in disabled:
-        logger.info("图片模块已被启动硬件检测自动禁用（显存/内存不足），不注册 wan-t2i / wan-i2i")
-    elif video_python.is_file():
-        for image_engine_id in (IMAGE_T2I_ENGINE_ID, IMAGE_I2I_ENGINE_ID):
+        logger.info("图片模块已被启动硬件检测自动禁用（显存/内存不足），不注册 sana-multiling / wan-i2i")
+    else:
+        if image_python.is_file():
             engine_manager.register_factory(
-                image_engine_id,
+                IMAGE_T2I_ENGINE_ID,
+                _make_worker_factory(
+                    image_python,
+                    project_root,
+                    config,
+                    IMAGE_T2I_ENGINE_ID,
+                    "app.tasks.sana_worker:create_adapter",
+                    frozenset({"image"}),
+                    extra_env={
+                        "CHENGUAI_SANA_ENGINE_ID": IMAGE_T2I_ENGINE_ID,
+                        "CHENGUAI_SANA_MODEL_ID": IMAGE_T2I_ENGINE_ID,
+                        # 权重根目录必须显式传下去，与视频 CHENGUAI_VIDEO_MODEL_CACHE_DIR、
+                        # 音乐 CHENGUAI_MUSIC_CHECKPOINTS_DIR 同一套路：不传的话 worker 会退回
+                        # 「models_dir/sana-multiling」这个默认拼法，用户在 config.json 里
+                        # 改 image_model_dir（换盘、换目录）就完全不生效。
+                        "CHENGUAI_SANA_MODEL_CACHE_DIR": str(image_models),
+                    },
+                    log_dir=log_dir,
+                ),
+            )
+            logger.info(
+                "Sana 文生图引擎已注册（sana-multiling，worker：%s，权重：%s）",
+                image_python,
+                image_models,
+            )
+        else:
+            logger.info(
+                "Sana 文生图引擎未注册（缺少 %s）。文生图需要 .venv-image 环境"
+                "（torch cu130 + diffusers + transformers），可用 scripts\\verify_env.py 自检",
+                image_python,
+            )
+
+        # ---- 图生图 wan-i2i（VACE-1.3B 参考重绘，与视频共用权重与 venv）----
+        if video_python.is_file():
+            engine_manager.register_factory(
+                IMAGE_I2I_ENGINE_ID,
                 _make_worker_factory(
                     video_python,
                     project_root,
                     config,
-                    image_engine_id,
+                    IMAGE_I2I_ENGINE_ID,
                     "app.tasks.video_worker:create_adapter",
                     frozenset({"image"}),
                     extra_env={
-                        "CHENGUAI_VIDEO_ENGINE_ID": image_engine_id,
+                        "CHENGUAI_VIDEO_ENGINE_ID": IMAGE_I2I_ENGINE_ID,
                         "CHENGUAI_VIDEO_MODEL_CACHE_DIR": str(video_models),
                     },
                     log_dir=log_dir,
                 ),
             )
-        logger.info(
-            "Wan2.1 图片引擎已注册（wan-t2i / wan-i2i，worker：%s，权重：%s）",
-            video_python,
-            video_models,
-        )
-    else:
-        logger.info(
-            "Wan2.1 图片引擎未注册（缺少 %s）。请先运行 scripts\\setup_video_venv.ps1 创建 .venv-video",
-            video_python,
-        )
+            logger.info(
+                "Wan2.1 图生图引擎已注册（wan-i2i，worker：%s，权重：%s）",
+                video_python,
+                video_models,
+            )
+        else:
+            logger.info(
+                "Wan2.1 图生图引擎未注册（缺少 %s）。请先运行 scripts\\setup_video_venv.ps1 创建 .venv-video",
+                video_python,
+            )
 
     # ---- ACE-Step 1.5 音乐引擎（ace-step-15，权重 MIT，2026-11-09 恢复注册）----
     # 独立 .venv-music；DiT 与 LM 权重全部 CPU 换入（6GB 显存档位，

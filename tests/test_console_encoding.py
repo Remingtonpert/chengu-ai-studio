@@ -72,9 +72,10 @@ def test_user_facing_scripts_and_bat_wrappers_are_encoding_safe() -> None:
     scripts = [
         "verify_env.py",
         "check_hardware.py",
-        "acceptance_sd.py",
+        "acceptance_image.py",
         "acceptance_video.py",
         "download_image_weights.py",
+        "download_sana_weights.py",
         "download_video_weights.py",
         "download_music_weights.py",
     ]
@@ -83,7 +84,7 @@ def test_user_facing_scripts_and_bat_wrappers_are_encoding_safe() -> None:
         assert 'reconfigure(encoding="utf-8", errors="replace")' in text, name
 
     bats = [
-        "acceptance_sd.bat",
+        "acceptance_image.bat",
         "acceptance_video.bat",
         "acceptance_music.bat",
         "run_web.bat",

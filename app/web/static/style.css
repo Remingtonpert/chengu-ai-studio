@@ -341,6 +341,12 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
   max-width: 100%; max-height: 76vh; object-fit: contain;
   border-radius: var(--radius); background: var(--bg-card); border: 1px solid var(--line);
 }
+/* 视频在同灯箱里放大播放：尺寸口径跟图片一致，黑底是画面外的边。 */
+.lb-fig video {
+  max-width: 100%; max-height: 76vh; width: min(920px, 92vw);
+  object-fit: contain; background: #000;
+  border-radius: var(--radius); border: 1px solid var(--line);
+}
 .lb-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .lb-meta { font-size: 12px; color: var(--text-mid); word-break: break-word; flex: 1; }
 .lb-actions { display: flex; gap: 8px; flex: none; }

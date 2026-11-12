@@ -1,4 +1,4 @@
-﻿# 辰鹄AI创作中心 · 一键便携打包脚本
+# 辰鹄AI创作中心 · 一键便携打包脚本
 #
 # 产出 dist\ChenguAIStudio_Portable\ 完整目录包：应用代码 + 四个虚拟环境
 # （.venv / .venv-image / .venv-music / .venv-video）+ 包内自带 CPython 运行时 + 全部已就位
@@ -52,7 +52,7 @@ $basePy = (& (Join-Path $root '.venv\Scripts\python.exe') -c "import sys;print(s
 Write-Host "== 包内运行时：$basePy =="
 RC $basePy (Join-Path $dist 'runtime\python311')
 
-# 3) 四个虚拟环境（.venv 桌面/Web 主环境；.venv-image 图像 FLUX；.venv-video 视频 Wan2.1；.venv-music 音乐）
+# 3) 四个虚拟环境（.venv 桌面/Web 主环境；.venv-image 图像 Sana；.venv-video 视频 Wan2.1；.venv-music 音乐）
 #    .venv 里已装好 python-docx / openpyxl / python-pptx（智能体「做 Word/Excel/PPT」用的三个纯离线
 #    写库），整份 venv 一起带走，目标机上直接能用，不需要用户 pip install，也不会去联网装东西。
 if (-not $SkipVenvs) {
@@ -64,12 +64,12 @@ if (-not $SkipVenvs) {
 # 4) 模型权重（已下载多少带多少；缺的模块启动后对应引擎自动不注册）
 if (-not $SkipModels) {
     $modelDirs = @(
-        'models\sd-realvis',
-        'models\sd-vae-ft-mse',
-        'models\lcm-lora-sd15',
+        'models\sana-multiling',   # 文生图 Sana-1.6B 多语言版（9.06GB，含 Gemma-2-2B-IT 编码器与 DC-AE）
         'models\ace-step-1.5',
-        'models\wan2.1',
+        'models\wan2.1',           # 视频 wan-t2v/wan-i2v 与图生图 wan-i2i 共用同一套权重
         'models\llm\gguf'   # 智能体的 Qwen3-8B GGUF（5.03GB）：缺了它智能体就写不了文案、也写不了文档
+        # 注意：models\sd-realvis / sd-vae-ft-mse / lcm-lora-sd15（SD1.5 三件套）已下架、不注册、
+        # 界面上不可见，只作为本机后备留在盘上，故意不装进便携包，免得白背 4.4GB 权重。
     )
     foreach ($m in $modelDirs) {
         $p = Join-Path $root $m

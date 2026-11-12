@@ -1,11 +1,13 @@
 # 辰鹄 AI 创作中心：许可证审计
 
-**核查日期：2026-10-11（调研快照）· 2026-11-05 增补：FLUX 集成时点；**2026-11-08 再增补：图像引擎换成 SD1.5 + RealVis V5.1（OpenRAIL-M）+ sd-vae-ft-mse（MIT）+ LCM-LoRA（OpenRAIL++），FLUX.1-schnell 已整套删除**（见文末「2026-11-08 增补」）。原文中 2026-11-05 增补的 FLUX.1-schnell（Apache-2.0）与 ACE-Step 1.5（官方仓库 README 声明 MIT，权重经 `ACE-Step/Ace-Step1.5` 下载并逐文件校验）已实际集成进本地引擎；同日经 Hugging Face 仓库 API 复核权重仓库 license 元数据（见文末「模型许可台账」），两者均可商用、可随安装包再分发。同日视频选型收口：`Wan-AI/Wan2.1-T2V-1.3B-Diffusers`（文生视频）与 `Wan-AI/Wan2.1-VACE-1.3B-diffusers`（图生视频·首帧条件）经 HF API 实测均 **Apache-2.0（gated:false）**，已下载入包（`models/wan2.1`，两快照合计物理 44.18 GB）。Anima 视频引用已于 2026-11-05 整体移除（其真实上游为不可商用的社区许可，且代码原引用的仓库不存在），不下载、不入包。**  
+**核查日期：2026-10-11（调研快照）· 2026-11-05 增补：FLUX 集成时点；2026-11-08 再增补：图像引擎换成 SD1.5 + RealVis V5.1（OpenRAIL-M）+ sd-vae-ft-mse（MIT）+ LCM-LoRA（OpenRAIL++），FLUX.1-schnell 已整套删除（见文末「2026-11-08 增补」）；2026-11-10 第三次增补：文生图换成 Sana-1.6B 多语言版（仓库 Apache-2.0；内含 Gemma-2-2B-IT 编码器受 Gemma Terms of Use 约束、DC-AE 32× VAE 上游许可待复核），SD1.5 三件套退选为「留盘不注册」的后备（见文末「2026-11-10 增补」）。** 原文中 2026-11-05 增补的 FLUX.1-schnell（Apache-2.0）与 ACE-Step 1.5（官方仓库 README 声明 MIT，权重经 `ACE-Step/Ace-Step1.5` 下载并逐文件校验）已实际集成进本地引擎；同日经 Hugging Face 仓库 API 复核权重仓库 license 元数据（见文末「模型许可台账」），两者均可商用、可随安装包再分发。同日视频选型收口：`Wan-AI/Wan2.1-T2V-1.3B-Diffusers`（文生视频）与 `Wan-AI/Wan2.1-VACE-1.3B-diffusers`（图生视频·首帧条件）经 HF API 实测均 **Apache-2.0（gated:false）**，已下载入包（`models/wan2.1`，两快照合计物理 44.18 GB）。Anima 视频引用已于 2026-11-05 整体移除（其真实上游为不可商用的社区许可，且代码原引用的仓库不存在），不下载、不入包。**  
 **范围：Phase 0 候选推理代码、模型权重及当前依赖声明。不是法律意见，也不是完整 SBOM。**
 
 ## 核心结论
 
-- FLUX.1-schnell 与 FLUX.1-dev 的权重许可证不同：schnell 为 Apache-2.0，dev 为 FLUX.1 [dev] Non-Commercial License。旧文中“FLUX dev 可商用”的结论错误，现已撤回。
+- （历史）FLUX.1-schnell 与 FLUX.1-dev 的权重许可证不同：schnell 为 Apache-2.0，dev 为 FLUX.1 [dev] Non-Commercial License。旧文中“FLUX dev 可商用”的结论错误，现已撤回。FLUX.1-schnell 已于 2026-11-08 整套删除，**不再是现役模型**，现役文生图为 Sana-1.6B 多语言版（见文末台账）。
+- 现役文生图 `sana-multiling`（`Efficient-Large-Model/Sana_1600M_1024px_MultiLing_diffusers`）：仓库 license 元数据 **apache-2.0、gated:false**，快照内含 11358 字节的 Apache-2.0 `LICENSE` 文本 → 可商用、可随安装包再分发。两处附随组件要单独记账：文本编码器是 **Gemma-2-2B-IT**，受 **Gemma Terms of Use** 约束（允许商用，附禁止用途条款，再分发须按条款传递）；VAE 是 **DC-AE f32c32**，`vae/config.json` 的 `_name_or_path` 指向上游 `mit-han-lab/dc-ae-f32c32-sana-1.0-diffusers`，该上游仓库的许可**待联网复核**，复核前不得写成「已核验」。
+- SD1.5 三件套（RealVis V5.1 / sd-vae-ft-mse / LCM-LoRA）许可结论不变（OpenRAIL-M / MIT / OpenRAIL++，均允许商用），但**已不是注册引擎**：代码与权重留在盘上作后备，界面看不到；一旦有人手工注册使用，OpenRAIL 的使用限制义务仍然生效。
 - FramePack 代码为 Apache-2.0，但不能据此认定所用模型权重可按 Apache-2.0 使用；具体权重来源及 license 未核实，阻止集成和分发。
 - ACE-Step 仓库代码为 Apache-2.0；v1.5 实际权重的模型仓库条款尚未从官方模型卡确认，阻止启用/分发及任何商业使用结论。（2026-11-05 修订：`ACE-Step/Ace-Step1.5` 权重仓库 license 元数据经 HF 仓库 API 复核为 **MIT**，上述阻止结论解除，见文末台账。）
 - MusicGen 代码 MIT、权重 CC-BY-NC 4.0；权重明确为非商业许可。
@@ -16,7 +18,7 @@
 | 组件 | 代码许可 | 权重许可 | 商业/分发风险 | Phase 0 结论 |
 |---|---|---|---|---|
 | Hugging Face Diffusers | Apache-2.0 | 不适用，推理库本身不授予模型权利 | 依赖组件逐包清点；Apache notice/版权声明按条款保留 | 可作为候选推理库 |
-| FLUX.1-schnell | BFL 推理代码许可需按所用源文件核对；Diffusers 代码 Apache-2.0 | BFL 仓库明确为 Apache-2.0 | 保留 Apache-2.0 文本和模型归属；其他配套权重逐项审核 | 首选图片模型候选 |
+| FLUX.1-schnell | BFL 推理代码许可需按所用源文件核对；Diffusers 代码 Apache-2.0 | BFL 仓库明确为 Apache-2.0 | 保留 Apache-2.0 文本和模型归属；其他配套权重逐项审核 | （历史）曾为首选图片模型候选；**2026-11-08 因显存铁律整套删除**，现行图片模型见文末台账 |
 | FLUX.1-dev / dev 派生模型 | BFL 推理代码有独立许可，Diffusers 本身仍为 Apache-2.0 | FLUX.1 [dev] Non-Commercial License v1.1.1 | 仅授权非商业、非生产用途；商业用途须另行取得 BFL 授权；附有使用和内容过滤义务 | 不作为本项目默认模型；勿与 schnell 混淆 |
 | FramePack | 官方仓库 Apache-2.0 | FramePack 权重/上游权重需在实际模型 repo 分别确认；当前待核实 | 不得仅凭代码许可部署；须核对上游条款、使用区域、商业门槛及 NOTICE 义务 | 权重条款通过前不集成、不随应用分发 |
 | Tencent HunyuanVideo（对照） | 官方代码许可文件为 Tencent Hunyuan Community License Agreement 相关授权 | 同一社区协议覆盖其明确定义的模型权重和相关作品 | 有地域、用途、署名/Powered by、分发 Notice 和特定商业门槛条款；先阅读完整现行文本 | 原生大显存路线排除；FramePack 衍生/依赖关系需律师或授权方确认 |
@@ -70,16 +72,16 @@
 
 | 模型/组件 | 用途 | 来源仓库 | 大小（本机实测） | 许可（API 实测） | 商用 | 入便携包 |
 |---|---|---|---|---|---|---|
-| RealVis V5.1（SD1.5 精调） | 文生图 / 图生图（唯一图像引擎） | `SG161222/Realistic_Vision_V5.1_noVAE` | 3.97 GB（快照 `1e9f017a…`） | OpenRAIL-M（HF 元数据 `creativeml-openrail-m`） | ✅ | ✅（须附 RAIL-M 使用限制） |
-| sd-vae-ft-mse | 图像 VAE（RealVis 为 noVAE 版） | `stabilityai/sd-vae-ft-mse` | 0.31 GB | MIT | ✅ | ✅ |
-| LCM-LoRA（SD1.5） | 4-8 步加速 | `latent-consistency/lcm-lora-sdv1-5` | 0.13 GB | OpenRAIL++ | ✅ | ✅ |
+| RealVis V5.1（SD1.5 精调） | （历史）文生图 / 图生图；**2026-11-10 起不再注册为引擎**，代码与权重留盘作后备 | `SG161222/Realistic_Vision_V5.1_noVAE` | 3.97 GB（快照 `1e9f017a…`） | OpenRAIL-M（HF 元数据 `creativeml-openrail-m`） | ✅ | 留盘不注册；若随包须附 RAIL-M 使用限制 |
+| sd-vae-ft-mse | （历史）图像 VAE（RealVis 为 noVAE 版）；随 SD1.5 路径一起退居后备 | `stabilityai/sd-vae-ft-mse` | 0.31 GB | MIT | ✅ | 留盘不注册 |
+| LCM-LoRA（SD1.5） | （历史）4-8 步加速；随 SD1.5 路径退居后备 | `latent-consistency/lcm-lora-sdv1-5` | 0.13 GB | OpenRAIL++ | ✅ | 留盘不注册；若随包须附 RAIL++ 使用限制 |
 | Qwen3-8B Q4_K_M GGUF | AI 智能体本地对话 | `Qwen/Qwen3-8B` 的 GGUF 量化 | 4.68 GB | Apache-2.0 | ✅ | ✅（模型卡文本待补进 `models/llm/gguf/`） |
 | llama.cpp | 智能体推理运行时 | `ggml-org/llama.cpp` | `tools/llama_cpp` | MIT | ✅ | ✅（仓库内含 LICENSE） |
 | ACE-Step 1.5 代码 | AI 音乐引擎 | GitHub `ace-step/ACE-Step-1.5`（`vendor/ACE-Step-1.5`） | 仓库快照 | MIT | ✅ | ✅ |
 | ACE-Step 1.5 权重 | AI 音乐 | `ACE-Step/Ace-Step1.5` | 4 个 safetensors，9.40 GB（清理 `.cache` 残片后），逐文件校验 | MIT（gated:false） | ✅ | ✅ `models/ace-step-1.5` |
 | Qwen3-Embedding-0.6B | 音乐管线文本嵌入组件 | `Qwen/Qwen3-Embedding-0.6B` | 随音乐权重目录 | Apache-2.0 | ✅ | ✅ |
 | Wan2.1-T2V-1.3B-Diffusers | 文生视频（引擎 `wan-t2v`） | `Wan-AI/Wan2.1-T2V-1.3B-Diffusers` | HF 快照下载至 `models/wan2.1`（transformer 5.29GB fp32 + text_encoder 21.16GB fp32 + vae 0.48GB，bf16 换入峰值约 10.6GB） | Apache-2.0（gated:false） | ✅ | ✅ |
-| Wan2.1-VACE-1.3B-diffusers | 图生视频·首帧条件（引擎 `wan-i2v`） | `Wan-AI/Wan2.1-VACE-1.3B-diffusers` | 同一缓存根（text_encoder 10.58GB，VAE 与 T2V 共享 blob；两仓库合计物理 44.18 GB） | Apache-2.0（gated:false） | ✅ | ✅ 同上 |
+| Wan2.1-VACE-1.3B-diffusers | 图生视频·首帧条件（引擎 `wan-i2v`）；**图生图（引擎 `wan-i2i`，2026-11-09 起）复用同一快照，零新增下载、许可不变** | `Wan-AI/Wan2.1-VACE-1.3B-diffusers` | 同一缓存根（text_encoder 10.58GB，VAE 与 T2V 共享 blob；两仓库合计物理 44.18 GB） | Apache-2.0（gated:false） | ✅ | ✅ 同上 |
 | ~~Anima（已移除）~~ | ~~视频~~ | `circlestone-labs/Anima`（真实上游） | 不下载 | `circlestone-labs-non-commercial-license`（**非商业**） | ❌ | ❌ 不入包 |
 
 - （历史）FLUX.1-schnell 快照内含 Apache-2.0 LICENSE 文本；该模型已于 2026-11-08 删除，相关归属义务不再适用。
@@ -116,5 +118,32 @@ FLUX.1-schnell 权重 23.7 GB（磁盘 31.41 GB），FP8 仍需 12 GB 以上显�
 峰值 2051 MB / 58.5 s；图生图 768×512 峰值 2094 MB / 18.6 s；文生视频 Wan2.1-1.3B（512×384、49 帧、12 步、逐层卸载）
 峰值 2021 MB / 378.7 s。四项均远低于 6 GB。
 
-**中英文提示词**：SD1.5 的 CLIP 无中日韩词表，故新增 `app\engine\prompt_bilingual.py`（纯标准库、离线）做关键词桥接；
+**中英文提示词**：SD1.5 的 CLIP 无中日韩词表，故曾新增 `app\engine\prompt_bilingual.py`（纯标准库、离线）做关键词桥接；
 Wan2.1（UMT5）与 ACE-Step 原生多语，不需要桥接。桥接不改变许可义务，也不引入任何新模型。
+**2026-11-10 注**：SD1.5 不再是注册引擎后，这个桥接模块现役链路已不使用（只剩 `sd15.py` 与它的单元测试引用）；
+Sana 的编码器原生吃中英文与中英混合，产品不做任何翻译预处理。
+
+---
+
+## 2026-11-10 增补：文生图换成 Sana 后的许可台账
+
+**换件原因（选型问题，不是许可问题）**：SD1.5 + RealVis 的许可本身没问题（OpenRAIL 系允许商用），过不去的是
+「必须原生支持中英文」这一条——CLIP 文本编码器没有中日韩词表，中文只能靠关键词桥接，效果不可控。同日
+`wan-t2i`（Wan2.1-T2V-1.3B 单帧出图）也下架：它的分辨率受视频档 480p 像素预算限制，拿不到 1024 级。
+两者都**不删数据、不删历史任务记录**，只是不再注册、界面上看不到。
+
+**现役模型许可台账（2026-11-10，许可字段经 huggingface.co 仓库 API 实测读取）**：
+
+| 模型/组件 | 用途 | 来源仓库 | 大小（本机实测） | 许可（实测） | 商用 | 入便携包 |
+|---|---|---|---|---|---|---|
+| Sana-1.6B 多语言版 | 文生图（引擎 `sana-multiling`，`.venv-image`） | `Efficient-Large-Model/Sana_1600M_1024px_MultiLing_diffusers` | 磁盘实测 9.06 GB（下载脚本按 fp16 三件约 9.3 GB；text_encoder 4757.0+229.5 MB、transformer 3060.3 MB、vae 1191.2 MB） | **Apache-2.0**（`gated:false`；快照内含 11358 字节 `LICENSE` 文件） | ✅ | ✅ `models\sana-multiling` |
+| Gemma-2-2B-IT（Sana 的 `text_encoder/`） | Sana 文本编码器 | 内置在 Sana 仓库 `text_encoder/` 下，无需登录 Google 受限仓库 | 含在上面 9.06 GB 内（最大单件 4.99 GB） | **Gemma Terms of Use**（允许商用，附禁止用途条款） | ✅ | ✅（随包须按 Gemma 条款传递条款文本，属发布前必做） |
+| DC-AE f32c32（Sana 的 `vae/`） | Sana 32× 自编码器 | `vae/config.json` 的 `_name_or_path` = `mit-han-lab/dc-ae-f32c32-sana-1.0-diffusers` | 1.19 GB | **待复核**：权重随 Sana 仓库以 Apache-2.0 快照形式在盘上，但上游仓库自身的许可标注本会话未能核验 | ⚠️ 暂按上游仓库复核结果处理 | ⚠️ 复核前不单独再分发该组件 |
+| Wan2.1-VACE-1.3B | 图生图 `wan-i2i` + 图生视频 `wan-i2v` | `Wan-AI/Wan2.1-VACE-1.3B-diffusers` | 与视频共用 `models\wan2.1` | Apache-2.0（gated:false） | ✅ | ✅ |
+
+**核验方式与诚实缺口**：
+- Sana 主仓库的 `license=apache-2.0`、`gated=false` 由本会话经 HF 仓库 API 读取，快照目录里也确有 LICENSE 文件（11358 字节）；这两项是**已核验**事实。
+- Gemma-2-2B-IT 的条款类型（Gemma Terms of Use）取自 Sana 仓库对配套组件的说明与编码器来源模型卡；**再分发义务（附条款文本、下游不得移除）尚未落到 `THIRD_PARTY_NOTICES.md`**，与既有未完成项合并处理。
+- DC-AE 的上游许可为**待复核**：需要联网打开 `mit-han-lab/dc-ae-f32c32-sana-1.0-diffusers` 确认 license 字段。在此之前，任何文档、界面文案与安装包清单都不得把它写成「已确认 Apache/MIT」。
+- Sana 权重目前只做了「文件是否齐全 + 目录体积」核对（下载脚本打印 missing 与 GB 数），**没有逐文件 SHA-256 登记**——ACE-Step 四文件当时是逐文件校验过的，Sana 这一份属留证缺口，发布前应补进部署清单（`snapshots\` 下的目录名就是 HF 的 revision 标识，可据此复核来源与固定版本）。
+- SD1.5 三件套与 `models\sd-realvis`、`models\sd-vae-ft-mse`、`models\lcm-lora-sd15` 仍在盘上，属「已不注册」的后备；不改变其许可结论，也不再计入现役台账。

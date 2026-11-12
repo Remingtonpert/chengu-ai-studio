@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>辰鹄AI创作中心</title>
-<link rel="stylesheet" href="/static/style.css?v=20261109c">
+<link rel="stylesheet" href="/static/style.css?v=20261111c">
 </head>
 <body class="app">
 
@@ -80,23 +80,21 @@
       <p class="hint" id="engine-mode-hint"></p>
     </section>
     <section data-modes="t2i i2i t2v i2v">
-      <h4>生成尺寸（480p 档像素预算）</h4>
-      <div class="chips" id="aspect-chips-v">
-        <button class="chip" data-w="832" data-h="480">16:9</button>
-        <button class="chip" data-w="480" data-h="832">9:16</button>
-        <button class="chip" data-w="624" data-h="624">1:1</button>
-        <button class="chip" data-w="640" data-h="480">4:3</button>
-        <button class="chip" data-w="480" data-h="640">3:4</button>
-      </div>
+      <h4 id="size-title">生成尺寸（480p 档像素预算）</h4>
+      <!-- 档位组按板块由 app.js 渲染（文生图 1024 级六条 / 图生图与视频 480p 五条），与桌面端同名同序 -->
+      <div class="chips" id="aspect-chips-v"></div>
+      <!-- 尺寸控件按板块共用一组：文生图（Sana）按 32 的倍数、滑杆 320-2048；
+           图生图与视频（Wan）按 16 的倍数、滑杆 256-1024。下面的 min/max/step 只是进入页面时
+           （480p 档）的初值，切板块时 app.js 会改属性并回填当前值。 -->
       <div class="slider-row">
         <label for="vwidth-range">宽</label>
-        <input type="range" id="vwidth-range" min="256" max="832" step="16">
-        <input type="number" id="vwidth-num" class="num" min="256" max="832" step="16">
+        <input type="range" id="vwidth-range" min="256" max="1024" step="16">
+        <input type="number" id="vwidth-num" class="num" min="256" max="1024" step="16">
       </div>
       <div class="slider-row">
         <label for="vheight-range">高</label>
-        <input type="range" id="vheight-range" min="256" max="832" step="16">
-        <input type="number" id="vheight-num" class="num" min="256" max="832" step="16">
+        <input type="range" id="vheight-range" min="256" max="1024" step="16">
+        <input type="number" id="vheight-num" class="num" min="256" max="1024" step="16">
       </div>
       <p class="hint" id="v-vram-hint"></p>
     </section>
@@ -112,8 +110,9 @@
     </section>
     <section data-modes="t2i i2i t2v i2v music">
       <h4>Steps <span id="steps-label" class="muted"></span></h4>
+      <!-- 步数范围按板块切：文生图（Sana）10-40，其余 1-50；下面的属性是初值，app.js 会按板块改并回填。 -->
       <input type="range" id="steps-range" min="1" max="50" step="1">
-      <p class="hint" id="steps-hint">Wan 图片/视频档默认 28 步；ACE-Step turbo 音乐档默认 8 步（推荐）。</p>
+      <p class="hint" id="steps-hint">文生图（Sana）默认 20 步（引擎范围 10-40）；Wan 图生图/视频档默认 28 步；ACE-Step turbo 音乐档默认 8 步（推荐）。</p>
     </section>
     <section data-modes="t2i i2i t2v i2v music">
       <h4>Seed</h4>
@@ -192,6 +191,7 @@
   <button class="lb-nav lb-prev" id="lb-prev" title="上一张 (←)">‹</button>
   <figure class="lb-fig">
     <img id="lb-img" alt="生成结果">
+    <video id="lb-video" class="hidden" controls playsinline></video>
     <figcaption class="lb-bar">
       <div class="lb-meta" id="lb-meta"></div>
       <div class="lb-actions">
@@ -206,8 +206,8 @@
 </div>
 
 <div class="toast hidden" id="toast"></div>
-<script src="/static/app.js?v=20261109c"></script>
-<script src="/static/agent.js?v=20261109c"></script>
-<script src="/static/i18n.js?v=20261109c"></script>
+<script src="/static/app.js?v=20261111c"></script>
+<script src="/static/agent.js?v=20261111c"></script>
+<script src="/static/i18n.js?v=20261111c"></script>
 </body>
 </html>

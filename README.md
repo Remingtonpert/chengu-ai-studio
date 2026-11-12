@@ -9,11 +9,11 @@
 | **Phase 0** | ✅ 已完成 | 引擎调研、许可证审计、硬件兼容性分析、架构提案、开发计划 |
 | **Phase 1** | ✅ 已完成 | 桌面骨架与本地基础（PySide6 UI、SQLite、配置服务） |
 | **Phase 2** | ✅ 已完成 | 任务系统核心（FIFO 队列、状态管理、引擎生命周期隔离） |
-| **Phase 3** | 🚧 收尾中（2026-11-08 换模型重构完成；六能力真机验收 **4/6**：文生图、图生图、文生视频、AI 智能体已通过，图转视频与 AI 音乐在等「显存＋空闲物理内存」双窗口，实测本机空闲显存 1.3GB / 空闲内存 2.1GB） | 图像引擎已换成 **Stable Diffusion 1.5 + RealVis V5.1**：文生图 `sd-realvis` / 图生图 `sd-realvis-i2i`（同一份 3.97GB 权重、独立 worker 子进程、互斥加载；OpenRAIL-M 可商用）；LCM-LoRA 加速默认 6 步；真 1920×1080 由「底图 896×512 + 15 块分块高清重绘」实现；**真机实测峰值 1884MB（512×512 / 6.1s）与 2051MB（1920×1080 / 58.5s），远低于 6GB 铁律**；旧 FLUX.1-schnell（23GB 塞 12GB 显存）已于 2026-11-08 删除，腾出 31.41GB；**视频引擎 Wan2.1 1.3B**（`wan-t2v` 文生视频 / `wan-i2v` 图转视频·VACE 首帧条件，Apache-2.0，权重 44.18GB 在 `models/wan2.1`）已改「逐层卸载 + token 预算」把峰值压进 6GB 档；**AI 音乐 ACE-Step 1.5**（MIT，10.03GB，`models/ace-step`）；**AI 智能体**用项目内 `tools/llama_cpp` + `models/llm/gguf/Qwen3-8B-Q4_K_M.gguf`（Apache-2.0，**不用 Ollama**）；Web 控制台（三栏 + 五模式 Tab）与桌面端十页同时可用 |
+| **Phase 3** | 🚧 收尾中（2026-11-10 换模型完成；六能力真机验收 **3/6**：图生图、文生视频、AI 智能体已通过，**文生图换型为 Sana 后需重新实测峰值**，图转视频与 AI 音乐在等「显存＋空闲物理内存」双窗口，实测本机空闲显存 1.3GB / 空闲内存 2.1GB） | 图像引擎现职为 **Sana-1.6B 多语言版**：文生图 `sana-multiling`（Apache-2.0，文本编码器 Gemma-2-2B-IT 按 Gemma Terms of Use，权重 9.06GB 在 `models\sana-multiling`，独立 worker 子进程跑在 `.venv-image`），**文生图一次 1 张**，1024 级直出、超单遍像素预算（1.10MP）走「底图 + Lanczos 放大」到 1080p（1920×1088，元数据 `upscaled=true`、`tiles=0`）；**显存峰值 ≤6GB 目前是按 fp16 权重体积推算的预期值，真机未实测**（验收 `scripts/acceptance_image.bat`）。图生图 **`wan-i2i`**（Wan2.1-VACE-1.3B 参考重绘单帧，与视频共用 `.venv-video` 与 `models/wan2.1`，零新增下载）；**真 FLUX.1-schnell 与 SD1.5/RealVis 均已退出**（FLUX 2026-11-08 整套删除、腾出 31.41GB；SD1.5 三件套 4.41GB 留盘作后备但未注册、界面不可见，退场原因是选型不是许可）；**视频引擎 Wan2.1 1.3B**（`wan-t2v` 文生视频 / `wan-i2v` 图转视频·VACE 首帧条件，Apache-2.0，权重 44.18GB 在 `models/wan2.1`）已改「逐层卸载 + token 预算」把峰值压进 6GB 档（实测 2021MB）；旧「文生图 `wan-t2i`」2026-11-10 下架（受 480p 视频档像素预算限制），历史任务记录不删；**AI 音乐 ACE-Step 1.5**（MIT，9.40GB，`models/ace-step-1.5`）；**AI 智能体**用项目内 `tools/llama_cpp` + `models/llm/gguf/Qwen3-8B-Q4_K_M.gguf`（Apache-2.0，**不用 Ollama**）；Web 控制台（三栏 + 五模式 Tab）与桌面端十页同时可用 |
 
-**重要提示**（2026-11-08 晚同步）：图片引擎现在是 **SD1.5 + RealVis V5.1**（OpenRAIL-M 可商用，权重 3.97GB + VAE 0.31GB + LCM-LoRA 0.13GB，全部在 `models/` 下离线快照，注册时 SHA/大小逐文件校验）；中英文提示词都能出图——CLIP 不认中文，引擎内置 `app/engine/prompt_bilingual.py` 离线词表桥接（中文关键词→英文标签，原文一字不丢地存进产物 metadata，未收录的词会诚实提示）。**铁律：所有大模型可商用、中英文 prompt、峰值显存不超 6GB**。视频引擎 Wan2.1 提交前自动做显存预检，并按 token 预算自动把画幅缩到 6GB 能吃下的大小（不是一句「显存不足」把用户挡在门外）；引擎未注册时拒绝提交，程序不伪造任何占位图或模拟输出。**桌面端与网页端能力条、引擎 id、参数白名单、显存门槛逐字一致**（共用同一 `TaskService`）。真机端到端验收完成前勿视为正式产出。桌面界面跟随 Windows 深/浅色主题自动切换。
+**重要提示**（2026-11-10 同步）：图片引擎现在是 **Sana-1.6B 多语言版**（`sana-multiling`，Apache-2.0；文本编码器 Gemma-2-2B-IT 按 Gemma Terms of Use、DC-AE VAE 上游许可待复核；权重 9.06GB 在 `models\sana-multiling`，只取 fp16 变体，下载脚本 `scripts/download_sana_weights.py` 走 hf-mirror、断点续传）。**中英文提示词原生支持**，不需要任何桥接——多语言编码器直接吃中文，模型卡原文「supports Emoji, Chinese and English and all mixed prompts」，产物元数据里的 `prompt_translated` 恒为 false（历史上 SD1.5 那套离线中英桥接表 `app/engine/prompt_bilingual.py` 已不在现役链路，只被未注册的 `sd15.py` 与它的测试引用）。文生图**一次 1 张**，滑杆 320-2048、步长 32（Sana 的 VAE 是 32× 下采样，倍数不对会静默漂移，所以强制 32），单边不超过 2048；默认 1024×1024、steps 20（允许 10-40）、CFG 固定 4.5（多语言版官方推荐值，界面不给调，避免误用导致画面崩坏）。超单遍像素预算 1.10MP 时按预算出底图再 Lanczos 放大到目标尺寸（元数据 `upscaled=true`、`tiles=0`，不谎称原生 1080p）。**铁律：所有大模型可商用、中英文 prompt、峰值显存不超 6GB**——Sana 靠 fp16 逐模块换入（任一时刻显存里只有当前一件，最大单件 4.99GB）达成，这一条**尚未真机实测**。视频引擎提交前自动做显存预检，并按 token 预算自动把画幅缩到 6GB 能吃下的大小（不是一句「显存不足」把用户挡在门外）；引擎未注册时拒绝提交，程序不伪造任何占位图或模拟输出。**桌面端与网页端能力条、引擎 id、参数白名单、显存门槛逐字一致**（共用同一 `TaskService`）。真机端到端验收完成前勿视为正式产出。桌面界面跟随 Windows 深/浅色主题自动切换。
 
-**已知运行约束**（2026-11-08 晚实测）：图像模块只需约 2GB 显存，因此即使本机第三方程序长期占用约 10GB 也能正常出图（实测峰值 1.9-2.1GB）。视频与音乐仍需先释放显存：双击 `scripts/release_local_engine.bat` 只结束**本项目自己**的引擎进程（本地大模型空闲 10 分钟也会自动卸载，控制台也有「释放空闲引擎」按钮）；**绝不会去杀第三方程序**。视频引擎为 **Wan2.1 1.3B**（Apache-2.0；原 Anima 引用及其无效下载入口已于 2026-11-05 移除，真实上游 circlestone-labs/Anima 非商用，不下载、不入包）。
+**已知运行约束**（2026-11-10 口径）：Sana 的显存闸门写在引擎里——空闲显存低于约 **5120MB** 时自动退到「逐层换入」（慢约两三倍但能跑），低于约 **1500MB** 直接拒绝并点名是谁占着显存；加载权重另有一道物理内存闸门，要求空闲内存 **≥16GB**（历史上 Wan 在内存不足时被系统静默杀掉过，这道闸门就是那次之后加的）。视频与音乐仍需先释放显存：双击 `scripts/release_local_engine.bat` 只结束**本项目自己**的引擎进程（本地大模型空闲 10 分钟也会自动卸载，控制台也有「释放空闲引擎」按钮）；**绝不会去杀第三方程序**。文生图与视频、音乐共用同一条 FIFO 串行队列，一次只跑一个任务，界面上的排队与「前面还有 N 项」照实显示。视频引擎为 **Wan2.1 1.3B**（Apache-2.0；原 Anima 引用及其无效下载入口已于 2026-11-05 移除，真实上游 circlestone-labs/Anima 非商用，不下载、不入包）。
 
 ---
 
@@ -34,9 +34,9 @@ Third Project/
 ├── app/                          # 核心应用代码（桌面程序）
 │   ├── __init__.py              # 应用版本信息
 │   ├── bootstrap.py             # 启动入口、服务注册、生命周期管理
-│   ├── engine_registration.py   # 真实引擎注册（SD1.5 图像 / Wan2.1 视频 / ACE-Step 音乐 / 智能体 worker）
+│   ├── engine_registration.py   # 真实引擎注册（Sana 文生图 / Wan2.1 文生视频·图生视频·图生图 / ACE-Step 音乐 / 智能体 worker；五个引擎 id + 4200s 超时）
 │   ├── engine/prompt_utils.py   # 提示词类型规整（任意来源输入 → 干净字符串，零重依赖）
-│   ├── engine/prompt_bilingual.py # 中文→英文关键词桥接（SD1.5 的 CLIP 没有中日韩词表；纯标准库、离线、零显存）
+│   ├── engine/prompt_bilingual.py # （历史遗留）中文→英文关键词桥接（SD1.5 的 CLIP 没有中日韩词表才需要；纯标准库、离线、零显存。现役 Sana 用不上，只剩未注册的 sd15.py 与它的测试引用它）
 │   ├── core/                    # 核心服务层
 │   │   ├── config.py           # JSON 配置持久化与验证
 │   │   ├── hardware.py         # GPU/磁盘观察与运行前检查
@@ -48,11 +48,12 @@ Third Project/
 │   ├── engine/                  # 引擎抽象接口
 │   │   ├── __init__.py
 │   │   ├── abstract.py         # EngineAdapter Protocol
-│   │   ├── image/              # 图片引擎 adapter（SD1.5 + RealVis V5.1 + LCM-LoRA）
+│   │   ├── image/              # 图片引擎 adapter（现役：Sana-1.6B 多语言版；SD1.5 那套代码保留但不注册）
 │   │       ├── __init__.py     # PEP 562 惰性导出（没装 torch 的 .venv 也能 import app.engine.image）
-│   │       ├── plan.py         # 出图预算（单遍 / 底图+分块重绘）的唯一真相源，纯标准库
-│   │       ├── hires.py        # 分块网格、羽化融合 TileBlender、Lanczos 放大
-│   │       └── sd15.py         # SD1.5 引擎：文生图 / 图生图 / 分块真 1080p / 显存分档卸载
+│   │       ├── plan.py         # 出图预算的唯一真相源，纯标准库（SANA_PROFILE：32 倍数、单边 2048、单遍 1.10MP、目标 4.20MP；SD15_PROFILE 保留）
+│   │       ├── sana.py         # 现役文生图引擎：fp16 逐模块换入、显存两档闸门（5120/1500MB）+ 内存闸门（≥16GB）、steps 10-40、CFG 4.5、超预算走底图+Lanczos 放大
+│   │       ├── hires.py        # 分块网格、羽化融合 TileBlender、Lanczos 放大（Sana 只用其中的放大，不用分块重绘）
+│   │       └── sd15.py         # （未注册后备）SD1.5 引擎：文生图 / 图生图 / 分块真 1080p / 显存分档卸载
 │   │   └── video/              # 视频引擎 adapter（wan.py：Wan2.1 T2V / VACE）
 │   ├── models/                  # 模型管理（待 Phase 5 实现）
 │   │   ├── __init__.py
@@ -61,7 +62,8 @@ Third Project/
 │   ├── tasks/                   # 任务系统核心
 │   │   ├── __init__.py
 │   │   ├── engine_manager.py   # 引擎生命周期管理（懒启动、健康检查）
-│   │   ├── sd_worker.py        # SD1.5 图像 worker（生产适配器，运行于 .venv-image 子进程）
+│   │   ├── sana_worker.py      # 现役文生图 worker（生产适配器，运行于 .venv-image 子进程；参数白名单 width/height/steps/seed/negative_prompt，hires/init_image_path 明确拒绝）
+│   │   ├── sd_worker.py        # （未注册后备）SD1.5 图像 worker，留盘不接线
 │   │   ├── music_worker.py     # ACE-Step 音乐 worker（运行于 .venv-music 子进程）
 │   │   ├── video_worker.py     # Wan2.1 视频 worker（运行于 .venv-video 子进程）
 │   │   ├── models.py           # TaskRequest/TaskResult/TaskRecord/TaskStatus
@@ -82,22 +84,25 @@ Third Project/
 │   │   ├── theme.py            # 跟随系统的深浅色主题 + 网页端同款 MJ 调色 token 样式表
 │   │   ├── pages/              # 页面组件
 │   │   │   ├── __init__.py
-│   │   │   ├── creation_page.py   # 创作页：五模式 Tab + 会话流 + 想象/V·U/重试/取消/lightbox
+│   │   │   ├── creation_page.py   # 创作页：五模式 Tab + 会话流 + 想象/V·U/重试/取消/lightbox/工具内播放窗
 │   │   │   ├── engine_status_page.py
 │   │   │   ├── settings_page.py
 │   │   │   └── task_list_page.py
-│   │   └── widgets/            # MJ 风格组件：参数面板/composer/feed/产物卡/骨架/lightbox/toast
+│   │   └── widgets/            # MJ 风格组件：参数面板/composer/feed/产物卡/骨架/lightbox/播放窗/toast
 │   └── utils/                   # 工具函数
 │       └── config.py
 ├── tests/                       # 测试目录
-│   ├── test_sd15_plan.py        # 出图预算/档位/两端面板一致性对拍
-│   ├── test_hires_tiling.py     # 分块网格、羽化掩膜、融合几何
-│   ├── test_sd_worker_adapter.py # worker 参数白名单与 metadata 回传
-│   ├── test_prompt_bilingual.py # 中文桥接回归 9 条
+│   ├── test_sana_plan.py        # 现役出图预算（32 倍数 / 单遍 1.10MP / 目标 4.20MP / 放大档元数据）与两端面板一致性对拍
+│   ├── test_sana_worker_adapter.py # 现役 worker 参数白名单（拒绝 hires/init_image_path）与 metadata 回传
+│   ├── test_memprobe.py         # 空闲物理内存探测与加载闸门
+│   ├── test_sd15_plan.py        # （后备）SD1.5 预算与分块档位对拍，测的是未注册路径
+│   ├── test_hires_tiling.py     # 分块网格、羽化掩膜、融合几何（SD1.5 高清重绘用，Sana 不走分块）
+│   ├── test_sd_worker_adapter.py # （后备）SD1.5 worker 参数白名单与 metadata 回传
+│   ├── test_prompt_bilingual.py # （遗留）中文桥接回归 9 条，只覆盖未注册的 sd15 链路
 │   ├── test_phase1_foundation.py
 │   ├── test_task_service.py
 │   └── test_cross_process_safety.py  # 执行者锁/原子领取/5秒轮询接管专项测试
-├── LICENSES.md                    # 模型许可台账（集成的全部模型仅 Apache-2.0 / MIT）
+├── LICENSES.md                    # 模型许可台账（现役集成：Apache-2.0 / MIT / Gemma Terms of Use，DC-AE 上游待复核）
 ├── docs/                        # 技术文档
 │   ├── ARCHITECTURE.md         # 架构提案与模块边界
 │   ├── DEVELOPMENT_PLAN.md     # 阶段验收计划
@@ -109,10 +114,10 @@ Third Project/
 │   ├── run_app.ps1              # Windows PowerShell 启动桌面程序
 │   ├── verify_env.py            # 环境自检（Python/venv/依赖）
 │   ├── build_launcher.ps1       # .exe 启动器构建
-│   ├── acceptance_sd.bat/.ps1/.py # SD1.5 真机验收（文生图 + 图生图，自动等显存）
+│   ├── acceptance_image.bat/.ps1/.py # 现役文生图（Sana）真机验收：1024×1024 + 1920×1088 两档，逐档打印实测 peak_vram_mb，超 6000MB 立即停止；要求空闲显存 ≥6144MB 且空闲内存 ≥16000MB，不满足就每 180s 重试（最多 40 轮）
 │   ├── acceptance_video.bat/.ps1/.py # Wan2.1 真机验收（文生视频 + 图转视频，自动等显存）
 │   ├── acceptance_music.bat/.ps1 # ACE-Step 端到端验收（中文人声 48kHz wav + 时长截断实测）
-│   ├── acceptance_chain.ps1     # 图片→视频→音乐链式自动验收（显存窗口打开后自动跑，日志落 logs\）
+│   ├── acceptance_chain.ps1     # 依序 image→video→music 链式自动验收（显存窗口打开后自动跑，日志落 logs\）
 │   ├── release_local_engine.bat/.ps1  # 释放本机 LLM 引擎显存（生成前必跑）
 │   ├── agent_llm.ps1            # 「AI 智能体」自带大模型：-Setup / -Start / -Stop / -Status（llama.cpp 与 GGUF 权重都在项目内，只绑 127.0.0.1:11435）
 │   ├── run_agent_llm.bat        # 上面那个脚本的双击入口
@@ -122,6 +127,9 @@ Third Project/
 │   ├── download_music_weights.py # ACE-Step 1.5 权重下载（断点续传）
 │   ├── setup_video_venv.ps1      # 视频引擎环境一键搭建（.venv-video，幂等）
 │   ├── download_video_weights.py # Wan2.1 T2V/VACE 权重下载（hf-mirror，断点续传）
+│   ├── setup_image_venv.ps1      # 图像引擎环境一键搭建（.venv-image，幂等）
+│   ├── download_sana_weights.py  # 现役 Sana-1.6B 多语言版权重下载（hf-mirror、只取 fp16 约 9.3GB、黑名单跳过 fp32 三件约 12.3GB、断点续传；只报缺失与目录体积，无逐文件 SHA-256）
+│   ├── download_image_weights.py # （后备）SD1.5/RealVis 三件套下载与离线校验，现役不跑
 │   ├── finalize_music_weights.py # 权重下载监控 + 同步/校验自动收尾
 │   ├── probe_coerce.py          # 提示词规整（coerce_prompt_text）单元断言
 │   ├── probe_task_db.py         # 任务库只读查询（排查历史失败任务）
@@ -133,7 +141,7 @@ Third Project/
 │   └── portable/                # 打包模板：启动辰鹄.bat / 启动桌面端.bat / 打包与迁移说明.md
 ├── data/                        # 默认数据根：配置、会话数据库、日志、权重缓存、输出（可被环境变量覆盖）
 ├── .venv/                       # PySide6 桌面程序虚拟环境（Python 3.11）
-├── .venv-image/                 # 图片引擎专用虚拟环境（torch cu130 + diffusers 0.41 + peft，跑 SD1.5/RealVis/LCM）
+├── .venv-image/                 # 图片引擎专用虚拟环境（现役跑 Sana-1.6B 多语言版 worker：torch 2.14.1+cu130、diffusers 0.41.0、transformers 5.19.0；SD1.5 后备代码也留在仓库里但不注册、不接线）
 ├── .venv-video/                 # 视频引擎专用虚拟环境（torch cu130 + diffusers WanPipeline/WanVACEPipeline）
 ├── .venv-music/                 # 音乐引擎专用虚拟环境（transformers<4.58，与 .venv-image 隔离）
 ├── requirements-dev.txt         # 开发依赖（含 pytest）
@@ -181,8 +189,9 @@ python -m app.bootstrap
 | `--test-headless` | 无头模式（不显示 GUI，用于 CI/CD） |
 | `CHENGUAI_DATA_ROOT=<path>` | 覆盖默认数据根目录（模型/输出目录）；**默认不再写死盘符，改为项目根下 `data\`**（便携包整目录复制即数据随行） |
 | `CHENGUAI_APP_HOME=<path>` | 覆盖配置/会话数据库/日志所在的应用数据目录（便携包注入为包内 `data\apphome`） |
-| `CHENGUAI_DISABLE_MODALITIES=image,video,music` | 逗号分隔的禁用模态：对应引擎直接不注册（启动硬件检测分级自动注入；手工设置可用于调试） |
+| `CHENGUAI_DISABLE_MODALITIES=image,video,music` | 逗号分隔的禁用模态：对应引擎直接不注册（启动硬件检测分级自动注入；手工设置可用于调试）。三个开关互不牵连——禁用 `image` 只是不注册 `sana-multiling` 与 `wan-i2i`，视频与音乐照常注册 |
 | `CHENGUAI_THEME=auto\|light\|dark` | 界面主题覆盖；默认 `auto` 跟随 Windows 系统深浅色，运行中切换系统主题即时生效 |
+| `CHENGUAI_DISABLE_WEB_AUTOSTART=1` | 本次启动不让桌面端带起网页控制台（等价于把 `web_autostart` 设为 `false`，只影响当次）；测试环境默认就是不带起 |
 
 ---
 
@@ -201,6 +210,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run_web.ps1 -Foregro
 ```
 
 启动器从 `config.json` 读 `web_host` / `web_port`（默认 `127.0.0.1:8765`）：端口被别的程序占用时会说清楚是谁占着、该怎么办，不会把别人的服务当成自己，也不会甩 traceback。桌面端照常 `scripts\run_app.ps1`，两端共用同一条 SQLite FIFO 队列与执行者锁。
+
+**只开桌面端也能够打开网页端**：桌面端启动时会顺手把网页控制台带起来（日志里写「网页端已随桌面端启动：http://127.0.0.1:8765（PID …）」）；端口上已经是自家的网页端在监听就不重复起（认 `/api/health` 里的自家标记，别人的服务不当成自己、也绝不代杀）。桌面端自己不监听任何端口，所以两端不互抢端口：真撞上端口被第三方占着，网页端会自己往后挪一格（`8766`…最多五格）继续跑，真实地址记在 `logs\web-console.port`，`run_web.ps1` 认这个地址（要关掉自动挪端口就把 `web_port_fallback` 设为 `false`）。桌面端退出时若还有任务在排队/执行就故意留着网页端，免得把正在跑的任务拦腰砍断。不想要自动带起就把 `config.json` 里的 `web_autostart` 改成 `false`（文件里没这个键就自己加一行；也可以用环境变量 `CHENGUAI_DISABLE_WEB_AUTOSTART=1` 只关掉本次）。以前「桌面端跑得好、网页端打不开」正是这个原因：Web 服务压根没起来，8765 上没人监听。
 
 也可以手工起：
 
@@ -223,17 +234,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run_web.ps1 -Foregro
 | Tab | 提交 | 专属参数 | 后端行为 |
 |-----|------|----------|----------|
 | **AI 智能体** | 一句话（生成/聊天/文案/朗读） | 垫图上传、能力 pill | `POST /api/agent/command` → 同一条 `TaskService` 队列 + 本机大模型/SAPI，见下文「第六板块」一节 |
-| 文生图 | 4 张/次（`task_type=image`） | 尺寸（六档比例，可选真 1920×1080）/steps/seed/负向词 | **SD1.5 + RealVis V5.1 + LCM-LoRA**（`sd-realvis`）：LCM 加速 4-8 步（默认 6），中文提示词自动关键词桥接 |
-| 图生图 | 4 张/次 | 上述 + **重绘强度** + **垫图上传区** | **`sd-realvis-i2i`**（同一份权重的独立 worker，需本机绝对路径） |
+| 文生图 | **单任务、一次 1 张**（`task_type=image`；2026-11-10 起 Sana 不做 4 变体批） | 尺寸（六档：1024×1024 / 1152×640 / 640×1152 / 1152×864 / 864×1152 / 1920×1088，自定义滑杆 **320-2048、步长 32**）/**steps（默认 20，允许 10-40）**/seed/负向词；CFG 固定 4.5 不给调 | **Sana-1.6B 多语言版**（`sana-multiling`，`.venv-image` 独立 worker）：中英文原生直出，无需关键词桥接；尺寸必须是 **32 的倍数**、单边 ≤2048；超单遍像素预算 1.10MP 自动「底图 + Lanczos 放大」，1080p 档即走此路（`upscaled=true`、`tiles=0`） |
+| 图生图 | **单任务、一次 1 张** | 上述 + **垫图上传区**（**没有**「重绘强度」这个参数：改动幅度由提示词决定） | **Wan2.1-VACE-1.3B 参考重绘单帧**（`wan-i2i`，`.venv-video` 独立 worker，与视频共用 `models\wan2.1`，需本机绝对路径）：尺寸 **16 的倍数**、像素预算 459264（480p 档约 0.46MP，与视频、桌面端同一份数）、steps 默认 28 |
 | 文生视频 | 单任务（`task_type=video`） | 视频尺寸/**时长（5–161 帧）**/steps | **Wan2.1-T2V-1.3B**（`wan-t2v`，`.venv-video` 独立 worker），16fps mp4，提交前显存预检 |
 | 图生视频 | 单任务 | 同上 + **首帧图上传区** | **Wan2.1-VACE-1.3B**（`wan-i2v`）：首帧=垫图条件生成（mask 首帧 0、其余全生成），其余同上 |
 | AI音乐 | 单任务（`task_type=music`），提交前前端预检显存并弹能力边界确认 | BPM/目标时长（30–480s）/曲风 | **ACE-Step 1.5**（`.venv-music` 独立 worker），48kHz wav |
 
 要点：
-- **一次想象 = 4 个任务**；图片瓦片带 **V**（变体，strength 0.7×4）与 **U**（放大，1.5× + strength 0.45）；
-- **会话全局共用**：同一会话可混排图片网格、视频卡片（`<video>` 播放 + 首帧缩略 + ⬇下载）、未来音频播放条；
+- **一次想象：文生图 1 张**（2026-11-10 换 Sana 后不再 4 变体批——Sana 每张都要过一遍完整去噪，4 张会把队列时间拉到 4 倍而质量不变）；图片瓦片上仍保留 **V**（变体）与 **U**（放大）两个动作，按源图出自哪个引擎分流：Sana 源图不接受垫图——`U` 是同提示词同 seed 按更大尺寸重新出图（×1.34、32 的倍数、单边 ≤2048、目标 ≤4,200,000 像素，超单遍预算走底图+Lanczos 放大），`V` 是原尺寸换 seed 重新出图；`wan-i2i` 与历史 `wan-t2i` 的源图才走 `wan-i2i` 参考重绘（×1.34、16 的倍数、480p 档 459264 像素预算）。两者都一次 1 张，且图生图引擎没有「重绘强度」参数；
+- **会话全局共用**：同一会话可混排图片网格、视频卡片（卡片内 `<video>` 直接播 + 引擎写出的首帧当 poster + `⛶`/双击在灯箱里放大播放 + ⬇下载）、音频播放条（`<audio controls>`，同样在卡片内播）；
 - Tab 徽标 = 该模态活跃任务数。注意：各模式**前端提交与展示相互独立**，底层 TaskService 是**单一 FIFO 队列（串行执行）**，切 Tab 不会并发抢占；
-- 视频参数（导出固定 **16fps**（Wan 原生）、帧数 `4n+1`（5–161）、尺寸 16 的倍数、建议 ≤512×384）前端与引擎两侧同口径收口；提交前显存预检（空闲 <10500MB 直接拦截并提示先释放），引擎未注册时诚实拒绝，不产生任何任务与输出；
+- 视频参数（导出固定 **16fps**（Wan 原生）、帧数 `4n+1`（5–161）、尺寸 16 的倍数、建议 ≤512×384）前端与引擎两侧同口径收口；提交前做显存/内存预检（引擎侧按 6144MB 显存档位设计，加载另看空闲物理内存；不足时按 token 预算自动缩画幅或提示先释放，旧的「空闲 <10500MB 直接拦截」口径已作废），引擎未注册时诚实拒绝，不产生任何任务与输出；
 - 浏览器安全边界：无法读取剪贴板/拖入图片的真实磁盘路径，前端会**记住上次目录并按文件名预填**，用户核对即可；V/U 从已生成图走图生图不受此限；
 - 生成前先跑 `scripts\release_local_engine.bat` 释放显存，否则大概率 OOM。
 
@@ -281,6 +292,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run_web.ps1 -Foregro
 
 ---
 
+## 🖼️ 文生图引擎 Sana-1.6B 多语言版（2026-11-10 接入：`sana-multiling`，一次 1 张，真机峰值未实测）
+
+**这一节是现役文生图的唯一口径**，之前所有写 FLUX 或 SD1.5/RealVis 的章节都是历史记录。
+
+- **模型与许可**：`Efficient-Large-Model/Sana_1600M_1024px_MultiLing_diffusers`，Apache-2.0、`gated=false`（本会话按 HF API 核验，快照内含 LICENSE，11358 字节）。文本编码器是 **Gemma-2-2B-IT**，按 **Gemma Terms of Use**（允许商用，再分发要按条款附上声明）；VAE 是 **DC-AE 32×**，上游仓库 `mit-han-lab/dc-ae-f32c32-sana-1.0-diffusers` 的许可标注**尚未复核**，发布前必须补上，见 `docs/LICENSE_AUDIT.md` 文末「2026-11-10 增补」。
+- **权重**：`models\sana-multiling`，磁盘实测 **9.06 GB**（下载脚本口径约 9.3 GB，只取 fp16 三件；fp32 三件约 12.3 GB 用黑名单跳过）。缺权重时用 `scripts\download_sana_weights.py`（hf-mirror、断点续传）；脚本只打印缺失清单与目录体积，**没有逐文件 SHA-256 校验**，这是已知缺口。健康检查失败会点名缺哪个模块。
+- **为什么换掉 `wan-t2i`**：Wan2.1-T2V-1.3B 单帧出图的像素上限被视频档锁死在 480p（约 0.46 MP），画幅想大一点只能牺牲视频；Sana 的预算独立，且原生中英文、Apache-2.0。旧 `wan-t2i` 任务的历史记录仍可读，不删数据。
+- **出图口径**（唯一真相源 `app/engine/image/plan.py` 的 `SANA_PROFILE`）：尺寸必须是 **32 的倍数**（DC-AE 是 32× 下采样，倍数不对会静默漂移）、单边 ≤**2048**、单遍像素预算 **1,100,000**、目标硬上限 **4,200,000**。界面滑杆 **320-2048、步长 32**；默认 **1024×1024**、**steps 20**（允许 10-40）、**CFG 固定 4.5**（多语言版官方推荐值，不给调，调错会崩图）。档位：1024×1024 / 1152×640 / 640×1152 / 1152×864 / 864×1152 / **1920×1088（放大档）**。超过单遍预算时按预算出底图再 **Lanczos 放大**到目标尺寸，产物元数据写 `upscaled=true`、`tiles=0`——**不谎称原生 1080p，也没有分块重绘**。
+- **显存策略与闸门**（`app/engine/image/sana.py`）：fp16 三件**逐模块换入**——编码器 4757.0+229.5 MB（最大单件 **4.99 GB**）、transformer **3060.3 MB**、VAE **1191.2 MB**，任一时刻显存里只有当前一件，所以**推算**峰值能压在 6 GB 内。**这个 6 GB 是推算值，本机尚未实测**（显存长期被常驻大模型占满）。两道闸门：空闲显存 <**5120 MB** 自动退到「逐层换入」（慢约两三倍）、<**1500 MB** 直接拒绝并点名是谁占着显存；加载权重另要求空闲物理内存 **≥16 GB**（`app/engine/memprobe.py`，起因是 2026-11-08 Wan 在内存不足时被系统静默杀掉）。排障环境变量：`CHENGUAI_SANA_MIN_FREE_MB`、`CHENGUAI_SANA_MIN_FREE_RAM_MB`、`CHENGUAI_SANA_GUIDANCE`。
+- **验收**：`scripts\acceptance_image.bat`（→ `.ps1` → `.py`）要求空闲显存 ≥**6144 MB** 且空闲内存 ≥**16000 MB**，跑 1024×1024 与 1920×1088 两档，逐档打印实测 `peak_vram_mb`，**超过 6000 MB 立即停止**；不满足条件时每 180 秒重试、最多 40 轮。跑之前先双击 `scripts\release_local_engine.bat`。产物文件名 `sana_txt2img_*.png` / `sana_txt2img_upscaled_*.png`。
+- **一次 1 张**：Sana 每张都要走完整去噪，与视频、音乐共用同一条 FIFO 串行队列，界面照实显示排队位置。
+
 ## 🎬 视频引擎 Wan2.1（2026-11-05 接入：`wan-t2v` 文生视频 / `wan-i2v` 图生视频）（历史接入记录：本节里的「bf16 + 模型级 offload、T2V 换入峰值约 10.6GB、12GB 档」是当时的估算；2026-11-08 已改成**逐层 CPU 卸载**，真机实测文生视频峰值 **2021MB**、门槛降到 6144MB，见文末「FLUX 出局」章节）
 
 **选型（用户确认）**：Wan2.1 官方**不存在 I2V-1.3B 档**（I2V 只有 14B）；1.3B 档图生视频唯一官方
@@ -313,7 +336,7 @@ Apache-2.0 形态是 **VACE**。据此采用：
 
 ---
 
-## 🔧 FLUX 稳定性修复（2026-11-05）：中英文提示词 + 输出目录（历史：FLUX 已于 2026-11-08 删除，换成 SD1.5 + RealVis，见文末「FLUX 出局」一节）
+## 🔧 FLUX 稳定性修复（2026-11-05）：中英文提示词 + 输出目录（历史：FLUX 已于 2026-11-08 删除，先换 SD1.5 + RealVis，**SD1.5 也已于 2026-11-10 下架**；现役文生图是 Sana-1.6B 多语言版，见上面「文生图引擎 Sana-1.6B 多语言版」一节）
 
 **症状**：Web 控制台一批文生图全部报 `TextEncodeInput must be Union[TextInputSequence, Tuple[InputSequence, InputSequence]]`；任务卡片同时出现「产物不在输出目录」。
 
@@ -344,7 +367,7 @@ Apache-2.0 形态是 **VACE**。据此采用：
 
 ---
 
-## 🎨 桌面端 MJ 同款创作界面（2026-11-05）
+## 🎨 桌面端 MJ 同款创作界面（2026-11-05）（历史：本节里的引擎 id `flux-schnell`、「一次落库 4 个任务」都是当时的记录，图像引擎**已于 2026-11-10 下架换成 Sana、文生图改一次 1 张**；三栏结构与五 Tab 路由仍然有效）
 
 桌面端从「十个侧栏页 + 生成表单」重构为与 Web 控制台**一模一样的 Midjourney 风格三栏创作界面**；`app/tasks`、`app/engine`、`app/web` 与共享服务层一行未改，`app/ui/` 之外只动了 `app/bootstrap.py` 两处。
 
@@ -360,12 +383,12 @@ Apache-2.0 形态是 **VACE**。据此采用：
 
 ### 与网页端逐字对齐的行为（`app/ui/pages/creation_page.py`）
 
-- **提交**：一次「想象」排队 4 张；`seedLock` 时用 `seed+i`，否则每张随机 seed；提交后立即清空 composer 并滚到底部。
-- **门槛与文案**（与 `app.js` 完全一致）：空提示词「先写提示词」；无引擎「没有已注册的引擎，请先检查 engines_enabled 与引擎环境」；`i2i`/`i2v` 缺垫图各自专属文案；垫图路径必须是盘符开头的绝对路径，例：`D:\ChenguAI\uploads\photo.png`。
-- **视频**：参数面板与快照逻辑（`num_frames` 按 `4n+1` 吸附，**16fps**，5–161；垫图存在时写 `init_image_path`）；引擎按模式一一对应（t2v→`wan-t2v`、i2v→`wan-i2v`，`MODE_ENGINE_ALLOW` 过滤）；`imagine()` 提交前做显存预检（无 NVIDIA / 总显存 <12288MB / 空闲 <10500MB → toast 拦截并提示双击 `scripts\release_local_engine.bat`），引擎未注册同样诚实拒绝，不落库、不伪造。
-- **音乐**：四道门槛顺序与文案逐字——引擎未注册 / 检测不到 NVIDIA 显卡 / 显存总量 < 12288 MB / 空闲显存 < 7000 MB（提示双击 `scripts\release_local_engine.bat`）；通过后弹四行能力确认（4–10 分钟、12GB 约 8 分钟截断、不支持多轨、BPM·时长·串行队列），成功 toast 说明首次加载约 10GB 权重与 48kHz wav。
-- **V / U / 重试 / 取消**：`V` 强度 0.7 排 4 张变体；`U` 按 1.5×（受 1,350,000 像素安全上限回缩）强度 0.45 重建；失败任务「重试」走 `TaskService.retry_task`，命中原批次则并入，否则按参数回退模式建新批次；取消与引擎重启通过 `asyncio.run_coroutine_threadsafe` 回投到服务事件循环，结果用 toast 回执（跨线程经类信号，不用 `QTimer.singleShot`）。
-- **产物展示**：图片 4 格网格（单任务/视频/U 放大多为单列）、悬停淡入 `V 变化`/`U 放大`、`seed x · W×H` 角注、lightbox 大图（←/→、V/U、复制提示词、打开所在文件夹）、视频卡片（首帧缩略图 + 打开视频/文件夹）、音乐内嵌播放条（进度、时长、失败自动降级系统播放器）、加载骨架（取消按钮 + 排队位次 + 管线说明）、失败卡片（重试 / 「已重试 →」）、toast 三态。
+- **提交**：一次「想象」排 **1 个任务**（2026-11-10 文生图换成 Sana 后不再有 4 变体批——Sana 每张都要走一遍完整去噪，4 张只会把队列时间拉到四倍而质量不变）；面板勾了「固定 seed」就用面板里的 seed，否则每次随机；提交后立即清空 composer 并滚到底部。
+- **门槛与文案**（与 `app.js` 逐字一致）：空提示词「先写提示词」；缺引擎的文案按板块点名——文生图缺 `.venv-image` 与 `models\sana-multiling`，图生图与视频共用 `.venv-video`；`i2i`/`i2v` 缺垫图各有专属文案；垫图必须是盘符开头的绝对路径，例：`D:\ChenguAI\uploads\photo.png`。
+- **视频**：参数面板与快照逻辑（`num_frames` 按 `4n+1` 吸附，**16fps**，5–161；垫图存在时写 `init_image_path`）；引擎按模式一一对应（t2v→`wan-t2v`、i2v→`wan-i2v`，`MODE_ENGINE_ALLOW` 过滤）；提交前做显存预检：没有 nvidia-smi、或总显存 < **6144MB**（6GB 档）、或空闲低于 `VIDEO_FREE_FLOOR_MB`（2000MB）→ toast 拦截并提示双击 `scripts\release_local_engine.bat`；nvidia-smi 还在后台跑、暂时探不到显存时先放行，排队后引擎按真实显存判定，不够会明确报错、不会伪造输出。
+- **音乐**：门槛顺序与文案逐字——引擎未注册 / 没有 nvidia-smi / 总显存 < **6144 MB**（6GB 档）/ 空闲低于 `MUSIC_FREE_FLOOR_MB`（6144 MB，提示双击 `scripts\release_local_engine.bat`）；通过后弹「ACE-Step 1.5 能力边界确认」：带人声（中英文）或纯器乐、时长 10-480 秒、输出 48kHz wav、按 6GB 档设计（LM/DiT 走 CPU 卸载，峰值显存为预期值、尚未实测，验收以元数据 `peak_vram_mb` 为准）、不支持超长多轨道复杂编曲（无分轨导出）。
+- **V / U（图片卡片动作，按源图出自哪个引擎分流，两端同口径）**：源图来自 `sana-multiling` → Sana 不接受垫图，`U` 用同提示词、同 seed 按更大目标尺寸重新出图（尺寸 ×1.34 后按 32 的倍数对齐，超 4,200,000 像素目标上限等比回缩；超过 1,100,000 单遍预算时引擎按预算出底图再 Lanczos 放大到目标尺寸，元数据 `upscaled=true`），`V` 按原尺寸换 seed 重新出图（seed 规则两端一致：源任务有整数 seed 就取「源 seed + 1」，没有就发新的随机 seed，绝不沿用源 seed——沿用等于把同一张图重排一遍）；源图来自 `wan-i2i`（含 2026-11-10 前的`wan-t2i` 历史记录）→ 拿源图当垫图走 `wan-i2i` 参考重绘（16 的倍数、480p 档像素预算 459264 像素），`V` 同尺寸换 seed（同一 seed 规则）。各一次 1 张；图生图引擎没有「重绘强度」这个参数。失败任务「重试」走 `TaskService.retry_task`，命中原批次则并入，否则按参数回退模式建新批次；取消与引擎重启通过 `asyncio.run_coroutine_threadsafe` 回投到服务事件循环，结果用 toast 回执（跨线程经类信号，不用 `QTimer.singleShot`）。
+- **产物展示**：一批现在只有 1 个任务，瓦片一律单列（`.grid-one`；CSS 里的四列网格只为历史批次保留）、悬停淡入 `V 变化`/`U 放大`、`seed x · W×H` 角注、lightbox 大图（←/→、V/U、复制提示词、打开所在文件夹）、视频卡片（引擎写出的首帧封面 + 「▶ 播放」开**工具内播放窗**：播放/暂停、进度条、音量、另存、打开所在文件夹，关窗即释放解码器；一次只留一个播放窗）、音乐内嵌播放条（进度、时长；放不出来时卡片上写明原因，之后才走系统播放器）、加载骨架（取消按钮 + 排队位次 + 管线说明）、失败卡片（重试 / 「已重试 →」）、toast 三态。
 - **会话与状态**：`app/ui/session_store.py` 存 `desktop_sessions.json`（与任务库同目录，即 APP_HOME；临时文件 + `os.replace` 原子写，上限 120 会话），与 Web 的 localStorage 等价但换成本机文件；两端同开时读写同一份任务库，谁先持执行者锁谁执行。每 2.5 秒轮询 `list_tasks(limit=400)` 与 `list_statuses()`，用「状态签名」做脏检查后才重建网格。
 
 ### 十页功能一个不少
@@ -415,7 +438,7 @@ ACE-Step 1.5 已注册但未懒启动时，参数面板不再显示含糊的「�
 ### 一键打包：`scripts\build_portable.ps1`
 
 ```powershell
-> 便携安装包体积（2026-11-08 实测）：模型权重合计 **62.97 GB**（Wan 44.18 + RealVis 3.97 + VAE 0.31 + LCM 0.13 + GGUF 4.68 + ACE-Step 9.40）+ 代码与四个 venv；FLUX 33.73 GB 已删除，D 盘可用从 138.85 GB 升到 170.25 GB。
+> 便携安装包体积：现役模型权重（2026-11-10 实测 `models\`）合计 **67.32 GB**——Wan2.1 44.18 + Sana-1.6B 多语言 9.06 + ACE-Step 1.5 9.40 + 智能体 GGUF 4.68；SD1.5 三件套（RealVis 3.97 + VAE 0.31 + LCM-LoRA 0.13 = 4.41 GB）留在 `models\` 当后备但**不进包**（引擎已不注册）。整包体积（`dist\ChenguAIStudio_Portable` 111.2 GB、估 120-130 GB）仍是 2026-11-08 的实测口径，换型后尚未重新打包复测——真要发布前重跑一次 `scripts\build_portable.ps1` 再回填数字。
 pwsh -File scripts\build_portable.ps1                 # 完整打包 → dist\ChenguAIStudio_Portable\
 pwsh -File scripts\build_portable.ps1 -SkipModels     # 调试：跳过权重复制
 pwsh -File scripts\build_portable.ps1 -SkipVenvs      # 调试：跳过虚拟环境复制
@@ -423,7 +446,7 @@ pwsh -File scripts\build_portable.ps1 -OutDir E:\包   # 指定输出目录
 ```
 
 包内容：应用代码 + **四个虚拟环境**（`.venv`/`.venv-image`/`.venv-video`/`.venv-music`）+ **包内自带 CPython 3.11 运行时**
-（目标机无需装 Python）+ 已就位的权重（RealVis 三件套、Wan2.1、ACE-Step、Qwen3 GGUF；缺哪块权重/venv 对应模块自动不注册）+
+（目标机无需装 Python）+ 已就位的权重（Sana-1.6B 多语言版 9.06GB、Wan2.1 44.18GB、ACE-Step 9.40GB、Qwen3 GGUF 4.68GB；未注册的 SD1.5 三件套 4.41GB 目前也还在盘上；缺哪块权重/venv 对应模块自动不注册）+
 `启动辰鹄.bat` / `启动桌面端.bat` + **`打包与迁移说明.md`**（独立说明文档：迁移方法、显存门槛、各模型占用、FAQ）。
 打包时写入 `build_manifest.json`（记录打包机原路径，供目标机首启替换）。
 
@@ -460,7 +483,7 @@ pwsh -File scripts\build_portable.ps1 -OutDir E:\包   # 指定输出目录
 - 无任何遥测/上报/云端推理代码路径；Web 仅监听 127.0.0.1；启动即注入 HF 离线锁。
 - 权重完整性校验（SHA-256 / safetensors 文件头）全部在开发机打包前完成，目标机不做任何联网校验。
 
-**执行状态**：**真实完整打包已实测完成**（`dist\ChenguAIStudio_Portable`，含全部代码/venv/FLUX+ACE-Step 权重，111.2 GB）；此后每轮开发以 `robocopy /MIR` 对 dist 做增量同步；Wan2.1 权重（44.18 GB）与 `.venv-video` 已加入打包清单，dist 下次增量同步后整包约 **120-130 GB**（2026-11-08 重算：权重 62.97 GB + 四 venv/运行时，FLUX 33.73 GB 已剔除；确切体积待下次打包实测回填，D 盘剩余 170.25 GB 已核实充足）。
+**执行状态**：**真实完整打包已实测完成**（`dist\ChenguAIStudio_Portable`，含全部代码/venv/当时的 FLUX+ACE-Step 权重，111.2 GB；FLUX 此后已删除、换成 Sana 9.06 GB，整包未重新复测）；此后每轮开发以 `robocopy /MIR` 对 dist 做增量同步；Wan2.1 权重（44.18 GB）与 `.venv-video` 已加入打包清单，dist 下次增量同步后整包约 **120-130 GB**（2026-11-08 重算：权重 62.97 GB + 四 venv/运行时，FLUX 33.73 GB 已剔除；确切体积待下次打包实测回填，D 盘剩余 170.25 GB 已核实充足）。
 
 ---
 
@@ -471,7 +494,7 @@ pwsh -File scripts\build_portable.ps1 -OutDir E:\包   # 指定输出目录
 | 文件 | 作用 |
 |------|------|
 | `app/agent/router.py` | 自然语言 → 任务意图（规则优先，中英都能跑）：判 t2i / i2i / t2v / i2v / music / chat / copy / speak / **document（要的是 .docx/.xlsx/.pptx 文件）**，并从话里抠 seed、steps、尺寸与比例、时长（秒 → `4n+1` 帧）、bpm、纯音乐、人声语种；垫图 + 「动起来」判成 i2v，垫图 + 「改成」判成 i2i 并剥掉指令词 |
-| `app/agent/llm.py` | 只连本机 OpenAI 兼容端点（默认项目自带的 llama.cpp 服务，`llm_endpoint`/`llm_model`）；`resolve_model()` 在配置的模型名本机不存在时自动在同族里挑可用的（config 写 `qwen2.5:7b-instruct`、本机只有 `qwen2.5:14b-instruct` → 自动落到后者并在回复里说明，不静默假装）；加载权重期间的 503「Loading model」译成「正在加载权重，稍等几秒再发一次」而不是甩一个像故障的状态码；`unload()` 先试 llama.cpp 的 `POST /unload`（**实测 b12182 没有这个路由，回 404** → 交还显存实际由 `local_server.release_vram()` 停进程完成），端点是用户自己的 Ollama（没有 `/unload`）时回退到原生 `/api/generate` + `keep_alive=0`（12GB 单卡上大模型与 FLUX/Wan/ACE-Step 抢同一块显存） |
+| `app/agent/llm.py` | 只连本机 OpenAI 兼容端点（默认项目自带的 llama.cpp 服务，`llm_endpoint`/`llm_model`）；`resolve_model()` 在配置的模型名本机不存在时自动在同族里挑可用的（config 写 `qwen2.5:7b-instruct`、本机只有 `qwen2.5:14b-instruct` → 自动落到后者并在回复里说明，不静默假装）；加载权重期间的 503「Loading model」译成「正在加载权重，稍等几秒再发一次」而不是甩一个像故障的状态码；`unload()` 先试 llama.cpp 的 `POST /unload`（**实测 b12182 没有这个路由，回 404** → 交还显存实际由 `local_server.release_vram()` 停进程完成），端点是用户自己的 Ollama（没有 `/unload`）时回退到原生 `/api/generate` + `keep_alive=0`（12GB 单卡上大模型与图像/视频/音乐生成引擎抢同一块显存） |
 | `app/agent/local_server.py` | 项目自带大模型服务的看护：`tools\llama_cpp\llama-server.exe` + `models\llm\gguf\*.gguf`，只绑 `127.0.0.1:11435`；**就绪判定必须问模型本身**——`port_open()`（端口在听）与 `model_ready()`（`GET /v1/models` 回 200）分开，`status()` 里 `running` / `ready` / `loading` 三个状态各说各的，因为 llama-server 是**先绑端口、后加载权重**，加载期间整个端点回 503；`ensure_running()` 在**聊天要用模型时**按需拉起（正在加载就接班陪等，绝不重复起第二个实例抢同一块显存），非回环端点与别人的端口（例如用户自己的 11434）一律拒绝代启动；`stop()` 只杀自己 pid 文件里、镜像名确实是 `llama-server.exe` 的那个进程；`release_vram()` 生成入队前把自家服务停掉交还显存（下次聊天自动重载，代价 30–90 秒） |
 | `app/agent/speech.py` | Windows SAPI 朗读（免权重、可商用，Huihui/Kangkang/Yaoyao/Zira）；只承诺「朗读」，不假装能做听写 |
 | `app/agent/documents.py` | 「做文件」的落盘层：把大模型写出的结构落成 **`.docx` / `.xlsx` / `.pptx`**（`python-docx` / `openpyxl` / `python-pptx`，纯本地写 OOXML，**运行期一行都不联网**）。`parse_outline()` 吃「# 大标题 + ## 小节 + `-` 要点」，`parse_table()` 吃 `|` 分隔的表格（散文自动退成「项目 / 内容」两列），`skeleton_plan()` 在大模型没就位时按题目搭骨架并把正文标成「（待补充）」；上限（40 节 / 400 行 / 30 列 / 60 页）与 Windows 非法文件名字符清理都在这一层；缺库时 `DocumentEngineMissing` 给出「装哪一个」的人话，不抛 ImportError 堆栈 |
@@ -518,7 +541,7 @@ pwsh -File scripts\build_portable.ps1 -OutDir E:\包   # 指定输出目录
 | 3 | 网页端没有可靠启动入口（起没起、谁占端口都不知道） | — | 新增 `scripts\run_web.ps1` + 可双击的 `scripts\run_web.bat`：`-Restart` / `-Status` / `-Foreground` / `-Port` / `-NoBrowser`；端口从 `config.json` 读；**只认本项目自己的进程**（命令行含 `app.web.server` 或可执行文件是本 venv），别人的端口不代杀；起完自动开浏览器，失败打印日志尾部。venv 的 `python.exe` 会派生子进程持有监听套接字，故按属主逐个判 |
 | 4 | 智能体排队的生成**不在左栏会话流里**，刷新就找不到 | 会话分组是网页端前端 localStorage（`TaskRequest` 无 session_id），agent.js 提交后没登记 | `app.js` 新增 `attachAgentTask()`（导出 `window.ChenGuAttachTask`）：批内补进原网格、否则新建卡片，`persist()` + 重绘并滚到底；agent.js 在任务回执后调用它（kind/mode 按 modality 回退）。桌面端无此缺陷（`taskQueued` → `poll()` 早已接通） |
 | 5 | 智能体气泡复制后没有视觉反馈 | class 写成 `agent-dim`，CSS 里只有 `.agent-bubble.dim` | `agent.js` 两处改 `dim` |
-| 6 | 智能体聊天后，紧接着的生成常被「空闲显存不足」拦下 | 12GB 单卡上 Ollama 常驻 6–9GB 与 FLUX/Wan/ACE-Step 抢同一块显存；且 `llm` 客户端超时 90s 不够 9B 冷启动 | 新增配置键 `llm_timeout_seconds`（默认 240，范围 15–900）；`AgentService._generate()` 在**入队之前**调 `llm.unload()`（Ollama 原生 `/api/generate` + `keep_alive=0`），回执追加「已让本机大模型交还显存给生成引擎。」，返回 `freed_vram` |
+| 6 | 智能体聊天后，紧接着的生成常被「空闲显存不足」拦下 | 12GB 单卡上 Ollama 常驻 6–9GB 与图像/视频/音乐生成引擎抢同一块显存；且 `llm` 客户端超时 90s 不够 9B 冷启动 | 新增配置键 `llm_timeout_seconds`（默认 240，范围 15–900）；`AgentService._generate()` 在**入队之前**调 `llm.unload()`（Ollama 原生 `/api/generate` + `keep_alive=0`），回执追加「已让本机大模型交还显存给生成引擎。」，返回 `freed_vram` |
 | 7 | 默认模型 `qwen2.5:7b-instruct` 本机根本不存在，每次都得回退并多一句说明 | 默认值与实际模型库不符 | 默认值与本机 config 一并改为 **`qwen3.5:9b`**（Ollama 已装，6.6GB，与 `resolve_model()` 的同族首选顺序一致） |
 | 8 | 便携包里没有大模型，换机后智能体只剩模板回复 | 权重只散在 `D:\OllamaModels` | 新增 `scripts\import_llm_model.ps1`：按 manifest 的 config+layers digest **精确复制** blob 与 metadata（跳过 `-partial` 半成品）到项目内 `models\llm\ollama_models\`；已导入 **qwen3.5:9b / 6.1GB**（8 个 digest，含 5.24GB 主权重 + 0.86GB vision projector），报告写 `models\llm\ollama_models\imported-*.json`；`-List` 看源库、`-Restore` 用 robocopy 放回 Ollama store。换机后设 `OLLAMA_MODELS` 指向该目录即可离线跑 |
 
@@ -738,7 +761,7 @@ pwsh -File scripts\build_portable.ps1 -OutDir E:\包   # 指定输出目录
 
 ---
 
-## 🩹 截图点名的三件事：不拿闲聊当生成需求 / 智能体文生图一次出 4 张 / 退出与空闲把显存真的还回来（2026-11-08 · 开发完成，等待人工真机验收）
+## 🩹 截图点名的三件事：不拿闲聊当生成需求 / 智能体文生图一次出 4 张 / 退出与空闲把显存真的还回来（2026-11-08 · 开发完成，等待人工真机验收）（历史：SD1.5 时代的口径，**文生图已于 2026-11-10 下架换成 Sana，且改为一次 1 张**——「4 张」这条已作废；「闲聊不派任务」「退出/空闲交还显存」两条仍然有效）
 
 用户给的截图（`WPS拼图0.png`）里三处红笔标注就是本轮的全部范围：`输入你好，直接生图？`、`第3张没明白意图是画…一句话→1张图`、`赛博朋克雨夜街头…就设置了生成参数`。**只动「AI 智能体」的意图判定、任务批量、以及任务调度/显存判定这三层**；文生图、图生图、文生视频、图生视频、AI 音乐各自的模型与生成逻辑一行没动，自带大模型的加载参数（`ctx 16384` / KV `q8_0` / `--fit-target 3686`）也一行没改。
 
@@ -801,7 +824,7 @@ pwsh -File scripts\build_portable.ps1 -OutDir E:\包   # 指定输出目录
 
 ---
 
-## 🧊 2026-11-08 深夜：FLUX 出局、SD1.5 + RealVis 接手，三条铁律定档（开发完成，六能力真机验收进行中）
+## 🧊 2026-11-08 深夜：FLUX 出局、SD1.5 + RealVis 接手，三条铁律定档（开发完成，六能力真机验收进行中）（**历史章节**：SD1.5 这一代**已于 2026-11-10 下架**、退到未注册后备，现役文生图是 Sana-1.6B 多语言版，见上面「文生图引擎 Sana-1.6B 多语言版」一节；本节里 FLUX/SD1.5 的实测数字与选型理由作为审计证据保留，不得当成现状引用）
 
 ### 1️⃣ 为什么必须换掉 FLUX
 
@@ -955,7 +978,8 @@ Windows 直接把原生进程干掉，所以现场只留下「日志断在半路
 | --- | --- | --- | --- |
 | 视频 `wan-t2v` / `wan-i2v` | **16384MB** | 逐层卸载需 ≥2000MB 空闲显存；总显存 ≥6144MB；离线权重快照必须齐全 | `CHENGUAI_WAN_MIN_FREE_RAM_MB` |
 | 音乐 ACE-Step 1.5 | **14336MB** | 总显存 ≥12288MB；空闲显存 ≥6000MB；权重文件与代码仓库完整性 | `CHENGUAI_MUSIC_MIN_FREE_RAM_MB` |
-| 图像 `sd-realvis` / `-i2i` | **6144MB** | 空闲显存 ≥3600MB→模型级卸载、≥1500MB→逐层卸载；三件套离线快照齐全 | `CHENGUAI_SD_MIN_FREE_RAM_MB` |
+| 图像（现役）`sana-multiling` | **16384MB**（加载闸门） | 空闲显存 <5120MB→自动退逐层换入、<1500MB→拒绝并点名占用者；`models\sana-multiling` 离线快照齐全（缺权重提示跑 `scripts\download_sana_weights.py`） | `CHENGUAI_SANA_MIN_FREE_RAM_MB` / `CHENGUAI_SANA_MIN_FREE_MB` |
+| （未注册后备，2026-11-10 下架）图像 `sd-realvis` / `-i2i` | **6144MB** | 空闲显存 ≥3600MB→模型级卸载、≥1500MB→逐层卸载；三件套离线快照齐全 | `CHENGUAI_SD_MIN_FREE_RAM_MB` |
 
 拦截文案是**可操作的中文**，不是「内存不足」四个字。真机实测（当前 1.1GB 空闲内存）：
 
@@ -964,12 +988,13 @@ Wan2.1 视频引擎 暂不能加载：系统空闲物理内存只有 1.1 GB（�
 低于本引擎的加载门槛 16.0 GB：UMT5-XXL 文本编码单件就要约 11GB 物理内存。权重要先读进内存
 再分片换入显存，内存不够时进程会被系统直接杀掉、连报错都没有（2026-11-08 的 wan-i2v 就是这么
 静默消失的）。请先关闭占内存的程序（浏览器多标签页、其它 AI 工具、IDE）后重试；显存被本机推理
-引擎占着时可双击 scriptselease_local_engine.bat 释放。
+引擎占着时可双击 scripts
+elease_local_engine.bat 释放。
 ```
 
 视频产物 metadata 里也多了一项 `free_ram_mb_at_load`，事后台账能看出当时到底给了多少内存。
 
-**验收脚本同步**：`acceptance_video.ps1` / `acceptance_sd.ps1` 每一轮同时读空闲显存**和**空闲内存
+**验收脚本同步**：`acceptance_video.ps1` / `acceptance_image.ps1` 每一轮同时读空闲显存**和**空闲内存
 （`Win32_OperatingSystem.FreePhysicalMemory`），两个门槛都满足才启动；`acceptance_video.py` 增加
 `--min-ram`（默认 16000MB）。⚠️ 调用参数名是 `-MaxRounds` / `-MinFreeRAMMB`，写成 `-Rounds` 会被静默忽略。
 
@@ -1029,8 +1054,8 @@ Python 的 stdout 跟着它编码，中文 emoji 打不出来就抛异常。
 | --- | --- |
 | `app/core/console.py`（新建） | `ensure_utf8_console()`：把 stdout/stderr 切到 UTF-8 且 `errors=replace`；幂等，流被重定向/关闭/没有 `reconfigure` 时安静跳过——**兜底本身绝不能再成为崩溃源** |
 | 两端入口 | `app/bootstrap.py`（桌面端）与 `app/web/server.py`（网页端）的 `main()` 第一件事就是调用它 |
-| 手跑脚本 | `verify_env.py`、`check_hardware.py`、`acceptance_sd.py`、`acceptance_video.py`、三个 `download_*_weights.py` 内联同样的兜底（不依赖 `app` 包，脚本本身坏了也要能打印原因） |
-| 双击入口 | `acceptance_sd/video/music.bat`、`run_web.bat`、`run_agent_llm.bat`、`release_local_engine.bat` 统一加 `chcp 65001` 与 `set "PYTHONIOENCODING=utf-8"` |
+| 手跑脚本 | `verify_env.py`、`check_hardware.py`、`acceptance_image.py`、`acceptance_video.py`、四个 `download_*_weights.py` 内联同样的兜底（不依赖 `app` 包，脚本本身坏了也要能打印原因） |
+| 双击入口 | `acceptance_image/video/music.bat`、`run_web.bat`、`run_agent_llm.bat`、`release_local_engine.bat` 统一加 `chcp 65001` 与 `set "PYTHONIOENCODING=utf-8"` |
 
 真机验证（故意**不设** `PYTHONIOENCODING`、在 GBK 控制台里跑）：`verify_env.py` 正常打出 🔍 与中文并
 exit 0；`check_hardware.py` 正常输出「硬件检测：显卡 RTX 3060（12288MB） · 内存 63.8GB · 评级【达标】」；
@@ -1054,7 +1079,7 @@ exit 0；`check_hardware.py` 正常输出「硬件检测：显卡 RTX 3060（122
    每 180s 读一次 `nvidia-smi` 与 `Win32_OperatingSystem.FreePhysicalMemory`，**显存和内存两个条件同时满足才启动**，
    日志落 `logs\acceptance_<步骤>_r<轮>.log`。参数：`-MaxRounds`（默认 48；别写成 `-Rounds`）。
 3. 单项验收：
-   - 图转视频：`scripts\acceptance_video.bat`（会自动拿 `output\acceptance_sd` 里最新的 PNG 当首帧）。
+   - 图转视频：`scripts\acceptance_video.bat`（会自动拿图像验收目录里最新的 PNG 当首帧，目录名跟着图像验收脚本走）。
      窗口条件：空闲显存 ≥4000MB **且空闲内存 ≥16000MB**。首帧条件：VACE 加载要 16-18GB 物理内存。
    - AI 音乐：`scripts\acceptance_music.bat`。窗口条件：空闲显存 ≥12300MB **且空闲内存 ≥36GB**
      （比引擎自身的 6000MB/14336MB 门槛更保守，图的是「一次跑成」而不是中途被杀）。

@@ -36,10 +36,10 @@ from app.ui.main_window import MainWindow  # noqa: E402
 from app.ui.session_store import new_id  # noqa: E402
 
 DEMO_OUTPUTS = [
-    Path(r"D:\ChenguAI\Output\flux_txt2img_20261104_172835.png"),
-    Path(r"D:\ChenguAI\Output\flux_txt2img_20261104_173750.png"),
-    Path(r"D:\ChenguAI\Output\flux_txt2img_20261104_174916.png"),
-    Path(r"D:\ChenguAI\Output\flux_txt2img_20261104_180155.png"),
+    Path(r"D:\ChenguAI\Output\sana_txt2img_20261110_102400.png"),
+    Path(r"D:\ChenguAI\Output\sana_txt2img_20261110_102630.png"),
+    Path(r"D:\ChenguAI\Output\sana_txt2img_upscaled_20261110_103110.png"),
+    Path(r"D:\ChenguAI\Output\wan_i2i_20261110_104022.png"),
 ]
 missing = [p for p in DEMO_OUTPUTS if not p.exists()]
 
@@ -86,7 +86,7 @@ if not missing:
     demo = task_service.submit_task(
         TaskRequest(
             task_type="image",
-            engine_id="sd-realvis",
+            engine_id="sana-multiling",
             prompt="骨架屏演示任务（保持排队）",
             parameters={"width": 1024, "height": 1024, "steps": 4, "seed": 7},
         )

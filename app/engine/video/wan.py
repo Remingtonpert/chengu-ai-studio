@@ -1,16 +1,15 @@
-"""Wan2.1 生成引擎实现（视频：wan-t2v / wan-i2v；图片：wan-t2i / wan-i2i）
+"""Wan2.1 生成引擎实现（视频：wan-t2v / wan-i2v；图片：wan-i2i 图生图）
 
-2026-11-09 图片引擎重新选型：文生图/图生图不再用 SD1.5（CLIP 只认英文）或 FLUX
-（权重 23GB，用户明确否决；且 HF 上已是 gated 仓库，403 拉不动），改为直接复用
-已经下载好的 Wan2.1 1.3B：
-- wan-t2i：Wan2.1-T2V-1.3B 的 num_frames=1 单帧模式（Wan 官方就支持 T2V 模型出图），
-  文本编码器 UMT5-XXL 原生支持中文和英文 Prompt；
-- wan-i2i：Wan2.1-VACE-1.3B 的 reference_images 条件（官方 R2V 参考生成），
-  以垫图为参考按 Prompt 重画一张，产物是单帧 PNG。
-两个模型都是 Apache-2.0、单文件体积最小的 1.3B 档，权重与视频引擎完全共用
-（models/wan2.1 一套仓库，零新增下载）。显存策略与视频同一套：bf16 + 逐层换入，
-单帧的 token 数只有视频最低档的约 1/13，峰值预期比视频档（真机实测约 2GB）更低
-（图片档尚未真机实测，验收时补测）。
+2026-11-10 文生图换型：文生图改走 Sana-1.6B 多语言版（app/engine/image/sana.py，
+引擎 sana-multiling），本模块只保留 wan-i2i 这一个图片档：Wan2.1-VACE-1.3B 的
+reference_images 条件（官方 R2V 参考生成），以垫图为参考按 Prompt 重画一张，产物是单帧 PNG。
+原 wan-t2i（Wan2.1-T2V-1.3B 的 num_frames=1 单帧出图）已下架并从这里删除：它本质是
+视频引擎的副作用，分辨率被 480p 视频档的像素预算卡死，出图能力远不如 Sana，留着只会在
+界面上造出第二个「文生图」。历史上不用 SD1.5（CLIP 只认英文）或 FLUX（权重 23GB，
+用户明确否决，且 HF 上已是 gated 仓库）的理由同样适用于这里。
+wan-i2i 与 wan-i2v 共用 VACE 权重（models/wan2.1 一套仓库，零新增下载），均 Apache-2.0、
+1.3B 档。显存策略与视频同一套：bf16 + 逐层换入，单帧的 token 数只有视频最低档的约 1/13，
+峰值预期比视频档（真机实测约 2GB）更低（图片档尚未真机实测，验收时补测）。
 
 wan-i2v 使用官方 Wan2.1-VACE-1.3B（diffusers WanVACEPipeline）：
 Wan2.1 官方并没有发布 1.3B 参数的 I2V 模型（I2V 仅有 14B 档，12GB 显存跑不动），
@@ -49,6 +48,7 @@ from diffusers.utils import export_to_video
 from app.engine.abstract import VideoGenerationEngine
 from app.engine.memprobe import floor_mb_or, ram_gate_message, ram_gate_ok, read_physical_ram
 from app.engine.prompt_utils import contains_lone_surrogate, coerce_prompt_text
+from app.engine.video import budget
 
 # Wan2.1 支持的模型（全部 Apache-2.0，可直接商用与再分发；
 # 图片引擎与视频引擎共用同一套 HF 仓库缓存，零新增下载）
@@ -67,19 +67,10 @@ WAN_SUPPORTED_MODELS = {
         "default_steps": 28,
         "pipeline": "WanVACEPipeline",
     },
-    "wan-t2i": {
-        # 单帧生图：与 wan-t2v 同一权重（Wan 官方 T2V 模型 num_frames=1 即出图）。
-        "hf_repo": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        "license": "Apache-2.0",
-        # 单帧 token 数只有 81 帧视频档的约 1/13，DiT 走同样的逐层换入；
-        # 视频档真机实测峰值约 2GB，图片档预期更低——未实测，验收时补测。
-        "est_mem_gb": 5.4,
-        "default_steps": 28,
-        "pipeline": "WanPipeline",
-        "output": "image",
-    },
     "wan-i2i": {
         # 图生图：与 wan-i2v 同一 VACE-1.3B 权重，reference_images 参考重绘出单帧。
+        # 文生图不在这里：2026-11-10 起走 Sana（app/engine/image/sana.py），
+        # 原 wan-t2i 单帧档已下架删除，界面上不会同时出现两个「文生图」。
         "hf_repo": "Wan-AI/Wan2.1-VACE-1.3B-diffusers",
         "license": "Apache-2.0",
         "est_mem_gb": 5.4,
@@ -90,19 +81,21 @@ WAN_SUPPORTED_MODELS = {
 }
 
 # 引擎 ID 分组：图片档 / 走 VACE 管线的档 / 需要垫图的档
-_IMAGE_MODEL_IDS = frozenset({"wan-t2i", "wan-i2i"})
+# 图片档只剩 wan-i2i（文生图已由 Sana 承担），三组的差别仅在「是否需要垫图」。
+_IMAGE_MODEL_IDS = frozenset({"wan-i2i"})
 _VACE_MODEL_IDS = frozenset({"wan-i2v", "wan-i2i"})
 _REF_IMAGE_MODEL_IDS = frozenset({"wan-i2v", "wan-i2i"})
 
-# 尺寸必须可被 vae_scale_factor_spatial(8) * patch(2) = 16 整除
-_MULTIPLE = 16
-# Wan 原生帧率与 1.3B 档像素上限（480p 级：832x480；留一点余量到 480*832*1.15）
-WAN_FPS = 16
-_MAX_PIXELS = int(832 * 480 * 1.15)
-_MIN_FRAMES, _MAX_FRAMES = 5, 161
-# 6GB 显存铁律下真正的驱动量是 DiT 的 token 数：latent 帧数 × (宽/16) × (高/16)。
-# 20000 tokens ≈ 49 帧 @ 512x384 的实测峰值 5GB 上下，留一点余量。
-_MAX_TOKENS = 20_000
+# 档位账（16 倍数 / 帧率 / 480p 像素上限 / 帧数范围 / token 预算）由纯标准库的
+# app.engine.video.budget 统一定义：桌面 UI、Web 服务端和引擎子进程读同一套数字，
+# 不会出现「界面写一个数、引擎按另一个数算」。改数值只改 budget.py 与 app.js 两处。
+_MULTIPLE = budget.MULTIPLE
+WAN_FPS = budget.FPS
+# 像素/token 两条线都只从 budget.py 取（459264 / 20000），本文件不再写第二份字面值；
+# budget.MAX_PIXELS 是整数算法，别改回浮点写法（int(832*480*1.15) 会少 1 像素 = 459263）。
+_MAX_PIXELS = budget.MAX_PIXELS
+_MIN_FRAMES, _MAX_FRAMES = budget.MIN_FRAMES, budget.MAX_FRAMES
+_MAX_TOKENS = budget.MAX_TOKENS
 
 # Wan 官方 README 的标准负面提示（480p 档），用户未填写时使用
 DEFAULT_NEGATIVE_PROMPT = (
@@ -141,31 +134,21 @@ def _min_free_ram_mb() -> int:
 
 def _round_to_multiple(value: int, multiple: int = _MULTIPLE) -> int:
     """把尺寸就近取整到 multiple 的倍数，并限制在 [multiple*8, 2048]。"""
-    value = max(multiple * 8, min(int(value), 2048))
-    return round(value / multiple) * multiple
+    return budget.round_to_multiple(value, multiple)
 
 
 def _snap_frames(value: Any, default: int = 81) -> int:
     """Wan 时序 VAE 要求帧数为 4n+1；就近取整并夹在 [5, 161]。"""
-    try:
-        frames = int(value)
-    except (TypeError, ValueError):
-        frames = default
-    frames = max(_MIN_FRAMES, min(frames, _MAX_FRAMES))
-    snapped = ((frames - 1) // 4) * 4 + 1
-    if frames % 4 != 1 and snapped + 4 <= _MAX_FRAMES and (snapped + 4 - frames) <= (frames - snapped):
-        snapped += 4
-    return snapped
+    return budget.snap_frames(value, default)
 
 
 def _fit_pixels(width: int, height: int) -> tuple[int, int]:
-    """按请求比例缩到不超过 _MAX_PIXELS（1.3B 是 480p 档模型，超限只降规模不改比例）。"""
-    w, h = _round_to_multiple(width), _round_to_multiple(height)
-    if w * h > _MAX_PIXELS:
-        scale = (_MAX_PIXELS / (w * h)) ** 0.5
-        w = max(_MULTIPLE, _round_to_multiple(w * scale))
-        h = max(_MULTIPLE, _round_to_multiple(h * scale))
-    return w, h
+    """按请求比例缩到不超过 _MAX_PIXELS（1.3B 是 480p 档模型，超限只降规模不改比例）。
+
+    只用于两件事：图生视频按首帧比例推算目标尺寸，以及超预算报错时给出
+    「这一比例最大可用多少」。用户自选的视频档位不再被它悄悄改动——超限直接报错。
+    """
+    return budget.fit_pixels(width, height)
 
 
 def _hub_repo_cache_dir(cache_dir: Path, repo_id: str) -> Path:
@@ -191,7 +174,7 @@ class WanVideoEngineError(RuntimeError):
 
 
 class WanVideoEngine(VideoGenerationEngine):
-    """Wan2.1 引擎（wan-t2v 文生视频 / wan-i2v 图生视频 / wan-t2i 文生图 / wan-i2i 图生图）"""
+    """Wan2.1 引擎（wan-t2v 文生视频 / wan-i2v 图生视频 / wan-i2i 图生图）"""
 
     def __init__(
         self,
@@ -313,19 +296,30 @@ class WanVideoEngine(VideoGenerationEngine):
 
     @staticmethod
     def _latent_frames(num_frames: int) -> int:
-        """Wan 的时间压缩是 4x：81 帧 → 21 个 latent 帧。"""
-        return (int(num_frames) - 1) // 4 + 1
+        """Wan 的时间压缩是 4x：81 帧 → 21 个 latent 帧（4n+1 帧 → n+1 压缩帧）。"""
+        return budget.latent_frames(num_frames)
 
-    def _fit_token_budget(self, width: int, height: int, num_frames: int) -> tuple[int, int, bool]:
-        """画幅缩到 token 预算内（6GB 峰值铁律），返回 (宽, 高, 是否缩过)。"""
-        latent = self._latent_frames(num_frames)
-        tokens = max(1, (width // _MULTIPLE) * (height // _MULTIPLE) * latent)
-        if tokens <= _MAX_TOKENS:
-            return width, height, False
-        scale = (_MAX_TOKENS / tokens) ** 0.5
-        new_w = max(_MULTIPLE * 8, (int(width * scale) // _MULTIPLE) * _MULTIPLE)
-        new_h = max(_MULTIPLE * 8, (int(height * scale) // _MULTIPLE) * _MULTIPLE)
-        return new_w, new_h, True
+    def _enforce_budget(
+        self, width: int, height: int, num_frames: int, mode_label: str = "视频"
+    ) -> dict:
+        """按 6GB 档位预算判定，越线就抛错并给出这一档的具体上限。
+
+        这里**不再自动降档**。以前超预算会把画幅等比缩小（832×480 变 624×352），
+        界面上只字不提，用户以为拿到的是自己选的档位。现在要么原样出片，
+        要么在跑之前就失败，失败原因里写清 token 数、保持分辨率的最长帧数、
+        保持帧数的最大分辨率，让用户自己选方向。
+        """
+        report = budget.evaluate(width, height, num_frames)
+        if not report["ok"]:
+            raise WanVideoEngineError(budget.explain_over(report, mode_label))
+        print(
+            f"[wan] 档位 {report['width']}x{report['height']} @ {report['frames']} 帧"
+            f"（{report['seconds']}s）= {report['tokens']} tokens / 上限 {_MAX_TOKENS}；"
+            f"按所选档位原样出片，不做任何缩放。",
+            file=sys.stderr,
+            flush=True,
+        )
+        return report
 
     def _load_pipeline(self, pipeline_cls: Any, repo: str) -> Any:
         """同步加载（在线程池里执行）：bf16 主干 + fp32 VAE（官方示例范式）+ flow_shift。"""
@@ -414,25 +408,21 @@ class WanVideoEngine(VideoGenerationEngine):
                 raise WanVideoEngineError(f"首帧图片无法读取：{init}（{exc}）") from exc
             # 生成尺寸跟随首帧比例（1.3B 是 480p 档：按首帧长短边映射到 ~480p 像素预算）
             iw, ih = init_img.size
-            budget = _MAX_PIXELS / 1.15  # 目标像素预算（480p 级）
-            scale = (budget / max(1, iw * ih)) ** 0.5
+            pixel_budget = _MAX_PIXELS / 1.15  # 目标像素预算（480p 级）
+            scale = (pixel_budget / max(1, iw * ih)) ** 0.5
             width, height = _fit_pixels(int(iw * scale), int(ih * scale))
         else:
             if image_path:
                 raise WanVideoEngineError("文生视频不接受参考图：请在图生视频标签页使用图生视频引擎")
-            width, height = _fit_pixels(width, height)
+            # 只把尺寸对齐到 16 的倍数（DiT patch 要求），不缩档位：超限交给下面的预算判定。
+            width, height = budget.round_to_multiple(width), budget.round_to_multiple(height)
 
         num_frames = _snap_frames(num_frames)
-        # 先按 6GB 的 token 预算缩画幅，而不是甩一句「显存不足」把用户挡在门外。
-        raw_w, raw_h = width, height
-        width, height, trimmed = self._fit_token_budget(width, height, num_frames)
-        if trimmed:
-            print(
-                f"[wan] 6GB 显存预算（{_MAX_TOKENS} tokens）已满：{raw_w}x{raw_h} @ {num_frames} 帧 "
-                f"自动缩到 {width}x{height}（这是当前档位的最大能力；想更大请先减帧数）。",
-                file=sys.stderr,
-                flush=True,
-            )
+        # 6GB 档位预算：越线就报错，并把这一档的真实上限讲成具体数字（哪个方向能救）。
+        # 这里以前是「自动等比缩小画幅」，界面上完全看不见：用户选 832×480 却拿到
+        # 624×352，只留一行 stderr。用户定的规矩是档位钉死、不许偷偷降，所以改成必拦。
+        report = self._enforce_budget(width, height, num_frames, "视频")
+        width, height = int(report["width"]), int(report["height"])
         inference_steps = int(steps) if steps is not None else self.default_steps
         inference_steps = max(1, min(inference_steps, 50))
 
@@ -490,14 +480,38 @@ class WanVideoEngine(VideoGenerationEngine):
         if not output_path.is_file() or output_path.stat().st_size < 1024:
             raise WanVideoEngineError("mp4 导出结果异常（文件缺失或过小），已判为失败")
 
+        # 工具内显示用的封面：卡片上要放第一帧，否则两端（网页端的视频卡片、桌面端的
+        # 视频卡片）只能显示一行「预览不可用」。首帧直接从刚生成的 frames_out 里取，
+        # 不回头解码 mp4，也就不需要 ffmpeg；封面写失败不该把整条视频任务判失败。
+        preview_path: Optional[Path] = None
+        try:
+            candidate = output_path.with_name(f"{output_path.stem}-first.png")
+            first = frames_out[0][0]
+            if isinstance(first, PIL.Image.Image):
+                first.save(str(candidate))
+            else:
+                array = np.asarray(first.detach().cpu() if hasattr(first, "detach") else first)
+                if array.dtype != np.uint8:
+                    array = (np.clip(array, 0.0, 1.0) * 255.0).astype(np.uint8)
+                PIL.Image.fromarray(array).save(str(candidate))
+            if candidate.is_file() and candidate.stat().st_size > 512:
+                preview_path = candidate
+        except Exception:  # noqa: BLE001 - 封面只是锦上添花，留空由界面回退
+            preview_path = None
+
         return {
             "path": str(output_path.resolve()),
+            "preview": str(preview_path.resolve()) if preview_path else None,
             "status": "generated",
             "seed": seed,
             "frames": num_frames,
             "offload": getattr(self, "offload_mode", None),
             "free_ram_mb_at_load": self.free_ram_mb_at_load,
-            "token_budget_trimmed": trimmed,
+            # 档位账：把这一跑实际用的 token 与预算上限一起回传，界面按它显示，
+            # 不再有任何「缩过档」的隐藏动作（超预算在上面就失败了）。
+            "tokens": int(report["tokens"]),
+            "max_tokens": _MAX_TOKENS,
+            "steps": inference_steps,
             "fps": WAN_FPS,
             "seconds": round(num_frames / WAN_FPS, 2),
             "peak_vram_mb": round(torch.cuda.max_memory_allocated() / (1024 * 1024))
@@ -518,7 +532,7 @@ class WanVideoEngine(VideoGenerationEngine):
         negative_prompt: Optional[str] = None,
         output_dir: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """生成单帧图片（wan-t2i 文生图 / wan-i2i 参考图生图；产物 PNG）
+        """生成单帧图片（wan-i2i 参考图生图；产物 PNG）
 
         num_frames=1：Wan 的时间 VAE 把 1 帧压成 1 个 latent 帧（(1-1)//4+1=1），
         token 数约为视频最低档（49 帧）的 1/13；同样走逐层换入，视频档真机实测
@@ -533,7 +547,8 @@ class WanVideoEngine(VideoGenerationEngine):
         """
         if self.model_id not in _IMAGE_MODEL_IDS:
             raise WanVideoEngineError(
-                f"不支持生成图片的模型 ID：{self.model_id}（图片只有 wan-t2i / wan-i2i）"
+                f"不支持生成图片的模型 ID：{self.model_id}（本引擎的图片档只有 wan-i2i；"
+                "文生图请用引擎 sana-multiling）"
             )
         prompt = coerce_prompt_text(prompt) or ""
         if not prompt:
@@ -570,15 +585,20 @@ class WanVideoEngine(VideoGenerationEngine):
                 raise WanVideoEngineError(f"参考图无法读取：{ref}（{exc}）") from exc
             # 出图尺寸跟随参考图比例（与 i2v 同一套 480p 像素预算 + 16 倍数收口）
             iw, ih = ref_img.size
-            budget = _MAX_PIXELS / 1.15
-            scale = (budget / max(1, iw * ih)) ** 0.5
+            pixel_budget = _MAX_PIXELS / 1.15
+            scale = (pixel_budget / max(1, iw * ih)) ** 0.5
             width, height = _fit_pixels(int(iw * scale), int(ih * scale))
         else:
             if image_path:
                 raise WanVideoEngineError(
                     "文生图不接受参考图：改图请用图生图引擎（wan-i2i）"
                 )
-            width, height = _fit_pixels(width, height)
+            # 单帧出图同样不悄悄降档：只对齐到 16 的倍数，超 480p 像素上限就报错给数字。
+            width, height = budget.round_to_multiple(width), budget.round_to_multiple(height)
+            if width * height > _MAX_PIXELS:
+                raise WanVideoEngineError(
+                    budget.explain_over(budget.evaluate(width, height, 1), "单帧出图")
+                )
 
         inference_steps = int(steps) if steps is not None else self.default_steps
         inference_steps = max(1, min(inference_steps, 50))

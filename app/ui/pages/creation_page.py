@@ -1,19 +1,19 @@
-"""Creation-centre middle column — the desktop twin of the web console.
+"""创作中心中列 —— 网页控制台的桌面端孪生。
 
-Top bar (session title + engine/health pills), three tabs (AI 智能体 /
-文生视频 / 图生视频), the session feed and the composer bar. Every submit
-path mirrors ``app/web/static/app.js`` 1:1: imagine (one video task, VRAM
-gated) / retry / cancel / lightbox. Image and music boards are retired: the
-backend only accepts ``task_type == "video"``, so legacy image / music records
-stay viewable (open, save-as) but never spawn new work. The shared TaskService
-and EngineManager are the same objects the web console drives; sessions live in
-the local ``desktop_sessions.json`` via :class:`SessionStore`.
+顶栏（会话标题 + 引擎/健康胶囊）、标签页（AI 智能体 / 文生图 / 图生图 /
+文生视频 / 图生视频 / AI 音乐）、会话流与输入条。每条提交路径与
+``app/web/static/app.js`` 一一对应：imagine（串行队列里一次一个任务，提交前做
+显存预检）/ retry / cancel / lightbox，「放大」「变化」都走图生图 wan-i2i 参考
+重绘。两端共用同一个 TaskService 与 EngineManager、同一条 SQLite FIFO 队列；
+会话存在本地 ``desktop_sessions.json``（:class:`SessionStore`）。下架引擎
+（sd-realvis、wan-t2i）留下的历史记录仍然可读（打开、另存），但不会再新提交。
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 import shutil
 from pathlib import Path
@@ -46,16 +46,22 @@ from app.tasks.service import TaskService
 from app.ui.session_store import SessionStore, new_id
 from app.ui.widgets.common import (
     ToastHub,
+    clamp_int,
     fmt_time,
     now_iso,
-    open_local_file,
     rand_seed,
 )
 from app.ui.widgets.composer import Composer
 from app.ui.widgets.feed import ACTIVE_STATUSES, FeedArea
 from app.ui.widgets.lightbox import LightboxDialog
+from app.ui.widgets.media_player import MediaPlayerDialog
 from app.ui.widgets.param_panel import (
     ENGINE_TASK_TYPES,
+    IMAGE_T2I_MAX_PIXELS,
+    IMAGE_T2I_MAX_SIDE,
+    IMAGE_T2I_MAX_TARGET_PIXELS,
+    IMAGE_T2I_MIN_SIDE,
+    IMAGE_T2I_MULTIPLE,
     MODALITY,
     MODE_ENGINE_ALLOW,
     ParamPanel,
@@ -73,9 +79,11 @@ ABS_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 REF_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp"})
 NEEDS_REF = {"i2i", "i2v"}
 VIDEO_FPS = 16  # Wan2.1 原生帧率（Anima 时代的历史 24fps 已随引擎替换）
-# Wan2.1 提交前的显存预检：按 6GB 显存档位设计（bf16 + 逐层 CPU 卸载，
-# 视频档真机实测峰值 2021MB；图片档单帧、预期更低但未实测）。整机显存低于
-# 6GB 直接诚实拦截；起跑还需要约 1500MB 空闲显存（引擎侧 _SEQUENTIAL_MIN_FREE_MB）。
+# Wan2.1（图生图 / 视频）与 Sana-1.6B（文生图）提交前的显存预检：都按 6GB 显存档位
+# 设计。Wan：bf16 + 逐层 CPU 卸载，视频档真机实测峰值 2021MB；文生图换成 Sana fp16
+# 逐模块 CPU 换入，峰值是按三件权重体积推算的预期值、尚未实测（验收看 peak_vram_mb）。
+# 整机显存低于 6GB 直接诚实拦截；起跑还需要约 1500MB 空闲显存
+# （引擎侧 _SEQUENTIAL_MIN_FREE_MB）。
 VIDEO_MIN_VRAM_MB = 6_144
 VIDEO_FREE_FLOOR_MB = 2_000
 # ACE-Step 1.5 同样按 6GB 档设计（LM/DiT 走 CPU 卸载，峰值为预期值未实测）；
@@ -226,6 +234,7 @@ class CreationPage(QWidget):
         self.feed.cancelRequested.connect(self.cancel_task)
         self.feed.retryRequested.connect(self.retry_task)
         self.feed.saveRequested.connect(lambda tid, _batch: self.save_artifact_as(tid))
+        self.feed.playRequested.connect(lambda tid, _batch: self.play_artifact(tid))
         self.composer.submitRequested.connect(self.imagine)
         self.composer.refChosen.connect(self._on_ref_chosen)
         self.composer.refPathEdited.connect(lambda _path: self.update_composer_meta())
@@ -483,19 +492,25 @@ class CreationPage(QWidget):
 
     def _engine_for(self, modality: str) -> str:
         key = {"video": "vengine", "music": "mengine"}.get(modality, "vengine")
-        # 图片/视频各是两个独立引擎（wan-t2i / wan-i2i / wan-t2v / wan-i2v），
-        # 各自独立进程、互斥加载。默认值按当前板块给；设置里存着别的板块的
-        # 引擎时不跨板块串用（MODE_ENGINE_ALLOW 按板块一一对应）。
-        allowed = MODE_ENGINE_ALLOW.get(self.mode) or ()
+        # 每个板块各自一个独立引擎（文生图 sana-multiling / 图生图 wan-i2i / 视频
+        # wan-t2v、wan-i2v / 音乐 ace-step-15），各自独立 venv 与进程、互斥加载：
+        # 文生图走 .venv-image + models\sana-multiling，图生图与视频共用 .venv-video +
+        # models\wan2.1。默认值按当前板块给；设置里存着别的板块的引擎时不跨板块串用
+        # （MODE_ENGINE_ALLOW 按板块一一对应）。
+        # 板块取面板上的 panel.mode：CreationPage 自己没有 mode 属性（mode 只在
+        # TabButton 与 ParamPanel 上），以前这里写 self.mode 会直接 AttributeError，
+        # 所有提交路径都走不通——顺手按真实来源改到面板上。
+        mode = self.panel.mode
+        allowed = MODE_ENGINE_ALLOW.get(mode) or ()
         stored = str(self.store.settings.get(key) or "")
         if allowed and stored and stored not in allowed:
             stored = ""
         if modality == "video":
-            fallback = "wan-i2v" if self.mode == "i2v" else "wan-t2v"
+            fallback = "wan-i2v" if mode == "i2v" else "wan-t2v"
         elif modality == "music":
             fallback = "ace-step-15"
         else:
-            fallback = "wan-i2i" if self.mode == "i2i" else "wan-t2i"
+            fallback = "wan-i2i" if mode == "i2i" else "sana-multiling"
         return self.panel.engine_id() or stored or fallback
 
     def _submit(
@@ -565,10 +580,14 @@ class CreationPage(QWidget):
 
     def _collect_base_params(self) -> dict[str, Any]:
         p = self.panel.current_params()
+        # 缺省值按板块给：文生图（Sana）默认 1024×1024 / 20 步，图生图（Wan）仍是
+        # 480p 档的 832×480 / 28 步。正常情况下面板那个桶里已经有值，这里只是兜底，
+        # 但兜底成 832×480 会让文生图在桶缺键时悄悄退回 480p 档。
+        t2i = self.panel.mode == "t2i"
         base: dict[str, Any] = {
-            "width": int(p.get("width", 832)),
-            "height": int(p.get("height", 480)),
-            "steps": int(p.get("steps", 28)),
+            "width": int(p.get("width", 1024 if t2i else 832)),
+            "height": int(p.get("height", 1024 if t2i else 480)),
+            "steps": int(p.get("steps", 20 if t2i else 28)),
         }
         negative = str(p.get("negative", "")).strip()
         if negative:
@@ -623,20 +642,33 @@ class CreationPage(QWidget):
         if modality in ("video", "image"):
             want = "video" if modality == "video" else "image"
             label = "视频" if modality == "video" else "图片"
+            # 文生图板块（t2i）用的是 sana-multiling：独立 .venv-image 与 models\sana-multiling；
+            # 图生图与视频仍是 Wan2.1（.venv-video + models\wan2.1）。点名让用户补环境时
+            # 不能张冠李戴，把文生图指向 Wan 的 venv。
+            t2i = mode == "t2i"
+            owner = "Sana-1.6B 多语言版" if t2i else "Wan2.1"
             if not any(
                 want in (ENGINE_TASK_TYPES.get(e.engine_id) or ())
                 for e in self._engines
             ):
-                self.toast.show(
-                    f"Wan2.1 {label}引擎未注册：需 .venv-video（运行 scripts\\setup_video_venv.ps1）"
-                    "与 models\\wan2.1 权重（运行 scripts\\download_video_weights.py，Apache-2.0）；"
-                    "未就绪前不会提交任务，也不会伪造输出。",
-                    "error",
-                )
+                if t2i:
+                    self.toast.show(
+                        "Sana-1.6B 多语言版文生图引擎未注册：需 .venv-image 与 "
+                        "models\\sana-multiling 权重（运行 scripts\\download_sana_weights.py）；"
+                        "未就绪前不会提交任务，也不会伪造输出。",
+                        "error",
+                    )
+                else:
+                    self.toast.show(
+                        f"Wan2.1 {label}引擎未注册：需 .venv-video（运行 scripts\\setup_video_venv.ps1）"
+                        "与 models\\wan2.1 权重（运行 scripts\\download_video_weights.py，Apache-2.0）；"
+                        "未就绪前不会提交任务，也不会伪造输出。",
+                        "error",
+                    )
                 return
             if not nvidia_smi_available():
                 self.toast.show(
-                    f"显存不足，无法启动 Wan2.1 {label}模型：这台机器上没有 nvidia-smi"
+                    f"显存不足，无法启动 {owner} {label}模型：这台机器上没有 nvidia-smi"
                     "（检测不到 NVIDIA 显卡，最低要求 6GB 显存档位）。",
                     "error",
                 )
@@ -650,7 +682,7 @@ class CreationPage(QWidget):
                 )
             elif gpu.memory_total_mib < VIDEO_MIN_VRAM_MB:
                 self.toast.show(
-                    f"显存不足，无法启动 Wan2.1 {label}模型：显卡 "
+                    f"显存不足，无法启动 {owner} {label}模型：显卡 "
                     f"{gpu.name or '?'} 仅 {gpu.memory_total_mib} MB，"
                     f"最低要求 {VIDEO_MIN_VRAM_MB} MB（6GB 档）。",
                     "error",
@@ -658,7 +690,7 @@ class CreationPage(QWidget):
                 return
             else:
                 floor_ok, floor_note = self._vram_floor_check(
-                    VIDEO_FREE_FLOOR_MB, f"Wan2.1 {label}模型"
+                    VIDEO_FREE_FLOOR_MB, f"{owner} {label}模型"
                 )
                 if not floor_ok:
                     self.toast.show(floor_note, "error")
@@ -721,8 +753,8 @@ class CreationPage(QWidget):
                 },
             )
             engine_id = self._engine_for("image")
-            # Wan 单帧出图一次 1 张（旧 SD1.5「说一句出 4 张」已随引擎退场：
-            # 1.3B + CPU 卸载下 4 连发要排队 4 轮，不如让用户看清一次真实耗时）。
+            # 单帧出图一次 1 张（旧 SD1.5「说一句出 4 张」已随引擎退场：文生图（Sana）与
+            # 图生图（Wan VACE）都是单遍串行，4 连发要排 4 轮，不如让用户看清一次真实耗时）。
             queued = 0
             for index in range(1):
                 params = dict(base)
@@ -744,7 +776,7 @@ class CreationPage(QWidget):
                     "图生图已排队：Wan2.1-VACE 按垫图参考重绘（单帧 PNG，480p 档），"
                     "首次生成需加载权重，通常数分钟"
                     if mode == "i2i"
-                    else "文生图已排队：Wan2.1-T2V-1.3B 单帧渲染（PNG，480p 档），"
+                    else "文生图已排队：Sana-1.6B 多语言版（PNG，1024 级直出，超预算按底图+放大），"
                     "首次生成需加载权重，通常数分钟",
                     "success",
                 )
@@ -943,6 +975,31 @@ class CreationPage(QWidget):
         extra = f"（另有自动另存 {len(copies)} 份）" if copies else ""
         self.toast.show(f"已另存到 {target}{extra}", "success")
 
+    def play_artifact(self, task_id: str) -> None:
+        """在工具里的播放窗播放视频/音频产物——对应网页端灯箱里的 <video>。
+
+        一次只留一个播放窗：旧的先关掉。视频解码要吃显存和解码通道，几条一起放
+        会把显存堆上去（这台机器只有 12GB），关掉窗口才释放解码器。
+        """
+        rec = self._tasks.get(task_id)
+        if rec is None or rec.status.value != "completed":
+            self.toast.show("这个任务还没有可播放的产物", "error")
+            return
+        suffixes = (
+            AUDIO_SUFFIXES if rec.request.task_type == "music" else VIDEO_SUFFIXES
+        )
+        files = output_paths(rec, suffixes)
+        if not files:
+            self.toast.show("这个任务没有能在工具里播放的产物文件", "error")
+            return
+        previous = getattr(self, "_media_dialog", None)
+        if previous is not None:
+            previous.close()
+        dialog = MediaPlayerDialog(self, files[0], rec.request.prompt or "")
+        self._media_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+
     # -------------------------------------------------------------- V / U
     def _source_record(self, task_id: str):
         rec = self._tasks.get(task_id)
@@ -962,31 +1019,69 @@ class CreationPage(QWidget):
         if self.task_service is None:
             return
         p = dict(rec.request.parameters or {})
-        width0 = int(p.get("width") or 832)
-        height0 = int(p.get("height") or 480)
-        # Wan 档放大 = 按 480p 像素预算等比重绘一档（16 的倍数对齐 VAE 压缩）；
-        # 源图已在预算内时放不了，直接如实说明，不提交伪放大任务。
-        width = clamp_int(width0 * 1.34 / 16, 16, 1024) * 16
-        height = clamp_int(height0 * 1.34 / 16, 16, 1024) * 16
-        if width * height > VIDEO_MAX_PIXELS:
-            factor = math.sqrt(VIDEO_MAX_PIXELS / (width * height))
-            width = clamp_int(width * factor / 16, 16, 1024) * 16
-            height = clamp_int(height * factor / 16, 16, 1024) * 16
+        # 「放大」按源图出自哪个引擎分两条真能跑的路：
+        # 文生图（sana-multiling）不接受垫图，所以它的放大走「同提示词 + 同 seed、
+        # 按更大目标尺寸重新出图」：超出 IMAGE_T2I_MAX_PIXELS（1100K 单遍预算）时引擎
+        # 按预算出底图再 Lanczos 放大到目标尺寸（元数据 upscaled=true）；比例不变时
+        # latent 网格不变、seed 相同，构图与源图一致。口径＝32 的倍数（DC-AE 32 倍
+        # 下采样）、边长 320-2048、目标不超过 IMAGE_T2I_MAX_TARGET_PIXELS（2048 级档）。
+        # 图生图（wan-i2i）与历史 wan-t2i 记录走图生图参考重绘：16 的倍数、
+        # VIDEO_MAX_PIXELS（480p 档）预算，超了就等比缩回。
+        # 引擎按源图点名，不按当前板块取：在视频板块点图片卡片的「放大」时，
+        # _engine_for("image") 会退回 sana-multiling 并带上垫图，引擎必然拒绝。
+        from_sana = str(rec.request.engine_id or "") == "sana-multiling"
+        engine_id = "sana-multiling" if from_sana else "wan-i2i"
+        multiple = IMAGE_T2I_MULTIPLE if from_sana else 16
+        min_side = IMAGE_T2I_MIN_SIDE if from_sana else 256
+        max_side = IMAGE_T2I_MAX_SIDE if from_sana else 1_024
+        budget = IMAGE_T2I_MAX_TARGET_PIXELS if from_sana else VIDEO_MAX_PIXELS
+
+        def align(value: float) -> int:
+            # clamp_int 夹的是「格数」（边长 ÷ 倍数），所以上下限也要先除以倍数：
+            # 原来直接写 16 与 1024，实际夹的是 16×16 到 16×1024 这种没意义的边长，
+            # 只是 480p 像素预算先把它压住了，所以一直没暴露。
+            return (
+                clamp_int(value / multiple, min_side // multiple, max_side // multiple)
+                * multiple
+            )
+
+        width0 = int(p.get("width") or (1_024 if from_sana else 832))
+        height0 = int(p.get("height") or (1_024 if from_sana else 480))
+        # 放大一档 = 边长 ×1.34 再等比对齐；源图已在预算内时放不了，直接如实说明，
+        # 不提交伪放大任务。
+        width = align(width0 * 1.34)
+        height = align(height0 * 1.34)
+        if width * height > budget:
+            factor = math.sqrt(budget / (width * height))
+            width = align(width * factor)
+            height = align(height * factor)
         if width <= width0 and height <= height0:
             self.toast.show(
-                f"源图 {width0}×{height0} 已在 480p 档像素预算（约 "
-                f"{VIDEO_MAX_PIXELS // 1000}K 像素）上限附近，Wan 档无法再放大；"
-                "要更大尺寸得另配超分或更大模型。",
+                (
+                    f"源图 {width0}×{height0} 已在 Sana 的目标硬上限（约 "
+                    f"{budget // 1000}K 像素，2048 级）附近，Sana 档无法再放大；"
+                    "要更大尺寸得另配超分或更大模型。"
+                )
+                if from_sana
+                else (
+                    f"源图 {width0}×{height0} 已在 480p 档像素预算（约 "
+                    f"{budget // 1000}K 像素）上限附近，Wan 档无法再放大；"
+                    "要更大尺寸得另配超分或更大模型。"
+                ),
                 "error",
             )
             return
         params: dict[str, Any] = {
             "width": width,
             "height": height,
-            "steps": int(p.get("steps") or 28),
-            "init_image_path": path,
+            # 步数缺省按引擎给：Sana 推荐 20 步（引擎按 10-40 夹取），Wan 仍是 28 步。
+            "steps": int(p.get("steps") or (20 if from_sana else 28)),
             "seed": int(p["seed"]) if isinstance(p.get("seed"), int) else rand_seed(),
         }
+        if not from_sana:
+            # 只有图生图（wan-i2i）吃垫图；Sana 引擎收到 init_image_path 会被 worker
+            # 直接拒绝（「不接受输入图片」），所以 Sana 档不带这个参数。
+            params["init_image_path"] = path
         if p.get("negative_prompt"):
             params["negative_prompt"] = p["negative_prompt"]
         session = self.store.ensure_active((rec.request.prompt or "U 放大")[:48])
@@ -995,7 +1090,7 @@ class CreationPage(QWidget):
             {
                 "id": new_id(),
                 "kind": "upscale",
-                "mode": "i2i",
+                "mode": "t2i" if from_sana else "i2i",
                 "prompt": rec.request.prompt,
                 "time": now_iso(),
                 "refPath": "",
@@ -1003,7 +1098,7 @@ class CreationPage(QWidget):
             },
         )
         try:
-            new_rec = self._submit(rec.request.prompt, params, "image", self._engine_for("image"))
+            new_rec = self._submit(rec.request.prompt, params, "image", engine_id)
             batch["taskIds"].append(new_rec.task_id)
             self.poll()
             self.feed.render(
@@ -1016,8 +1111,17 @@ class CreationPage(QWidget):
             self.feed.scroll_to_bottom()
             self.sessionsChanged.emit()
             self.toast.show(
-                f"放大任务已排队：{width}×{height}（Wan VACE 参考重绘补细节，"
-                "480p 档像素预算内）",
+                (
+                    f"放大任务已排队：Sana-1.6B 同提示词同 seed 按更大尺寸重新出图"
+                    f"（{width}×{height}；按 32 的倍数、单边不超过 2048；"
+                    f"超过 1024 级单遍预算 {IMAGE_T2I_MAX_PIXELS // 1000}K 像素时"
+                    "引擎按预算出底图再放大到目标尺寸，元数据 upscaled=true）"
+                )
+                if from_sana
+                else (
+                    f"放大任务已排队：Wan VACE 参考重绘补细节（{width}×{height}，"
+                    "480p 档像素预算内）"
+                ),
                 "success",
             )
         except Exception as exc:
@@ -1030,13 +1134,18 @@ class CreationPage(QWidget):
         if self.task_service is None:
             return
         p = dict(rec.request.parameters or {})
+        # 「变化」也按源图出自哪个引擎分流：文生图（sana-multiling）不接受垫图，
+        # 换 seed 重新出图就是真变体；图生图 / 历史记录走 wan-i2i 参考重绘。
+        # 引擎按源图点名，不跟当前板块走（在视频板块点图片卡片会派错引擎）。
+        from_sana = str(rec.request.engine_id or "") == "sana-multiling"
+        engine_id = "sana-multiling" if from_sana else "wan-i2i"
         session = self.store.ensure_active((rec.request.prompt or "V 变化")[:48])
         batch = self.store.add_batch(
             session["id"],
             {
                 "id": new_id(),
                 "kind": "variation",
-                "mode": "i2i",
+                "mode": "t2i" if from_sana else "i2i",
                 "prompt": rec.request.prompt,
                 "time": now_iso(),
                 "refPath": "",
@@ -1056,22 +1165,23 @@ class CreationPage(QWidget):
         else:
             base_seed = None
         ok = 0
-        # 变体 = 同一张垫图（源任务产物）换 seed 再走一遍 wan-i2i 参考重绘；
-        # Wan 档一次 1 张（旧 SD 一次 4 张已随引擎退场），无 strength 参数。
+        # 变体 = 换 seed 再走一遍：文生图（sana-multiling）源图按原尺寸重新出图（不接受
+        # 垫图，换 seed 本身就是新构图）；图生图与历史 wan-t2i 记录拿源图当垫图走
+        # wan-i2i 参考重绘。一次 1 张（旧 SD 一次 4 张已随引擎退场），无 strength 参数。
         for index in range(1):
             params = {
-                "width": int(p.get("width") or 832),
-                "height": int(p.get("height") or 480),
-                "steps": int(p.get("steps") or 28),
-                "init_image_path": path,
-                "seed": base_seed + index if base_seed is not None else rand_seed(),
+                "width": int(p.get("width") or (1_024 if from_sana else 832)),
+                "height": int(p.get("height") or (1_024 if from_sana else 480)),
+                "steps": int(p.get("steps") or (20 if from_sana else 28)),
+                "seed": base_seed + 1 if base_seed is not None else rand_seed(),
             }
+            if not from_sana:
+                # 只有 wan-i2i 吃垫图；Sana worker 收到 init_image_path 会直接拒绝。
+                params["init_image_path"] = path
             if p.get("negative_prompt"):
                 params["negative_prompt"] = p["negative_prompt"]
             try:
-                new_rec = self._submit(
-                    rec.request.prompt, params, "image", self._engine_for("image")
-                )
+                new_rec = self._submit(rec.request.prompt, params, "image", engine_id)
                 batch["taskIds"].append(new_rec.task_id)
                 ok += 1
             except Exception as exc:
@@ -1087,7 +1197,12 @@ class CreationPage(QWidget):
             )
             self.feed.scroll_to_bottom()
             self.sessionsChanged.emit()
-            self.toast.show(f"变体任务已排队（{ok} 张）", "success")
+            self.toast.show(
+                "变体任务已排队（Sana-1.6B 同提示词换 seed 重新出图，1 张）"
+                if from_sana
+                else "变体任务已排队（Wan VACE 参考重绘，1 张）",
+                "success",
+            )
 
     # ------------------------------------------------------- 重试 / 取消
     def retry_task(self, task_id: str, _batch_id: str = "") -> None:
@@ -1240,12 +1355,11 @@ class CreationPage(QWidget):
         if rec is None:
             return
         if rec.request.task_type == "video":
-            videos = output_paths(rec, VIDEO_SUFFIXES)
-            if videos:
-                open_local_file(videos[0])
+            # 点开卡片就在工具内的播放窗里放（以前是 os.startfile 甩给系统播放器）。
+            self.play_artifact(task_id)
             return
         if rec.request.task_type == "music":
-            return
+            return  # 音乐卡片自带播放条，点卡片本身不再做别的
         images = output_paths(rec, IMAGE_SUFFIXES)
         if not images:
             return

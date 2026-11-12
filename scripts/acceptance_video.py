@@ -49,7 +49,8 @@ def _pick_still(explicit: str | None) -> Path | None:
     if explicit:
         path = Path(explicit)
         return path if path.is_file() else None
-    for folder in ("acceptance_sd", "smoke_sd_i2i", "smoke_sd"):
+    # 新的 Sana 验收目录优先；旧的 SD 目录保留，历史上跑过的图还能当首帧用。
+    for folder in ("acceptance_image", "acceptance_sd", "smoke_sd_i2i", "smoke_sd"):
         files = sorted((ROOT / "output" / folder).glob("*.png"), key=lambda p: p.stat().st_mtime)
         if files:
             return files[-1]
@@ -135,7 +136,7 @@ async def main() -> int:
         finally:
             await engine2.shutdown()
     elif not args.skip_i2v:
-        print("[accept-video] 没找到可当首帧的图片（output/acceptance_sd 或 output/smoke_sd_i2i 为空），先跑验收图像", flush=True)
+        print("[accept-video] 没找到可当首帧的图片（output/acceptance_image 等目录为空），先跑 scripts\\acceptance_image.bat", flush=True)
         codes.append(2)
 
     for label, item in results:

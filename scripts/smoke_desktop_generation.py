@@ -90,7 +90,7 @@ if submitted != 4:
     failures.append(f"想象应排队 4 张，实际 {submitted}")
 latest = task_service.list_tasks(limit=4)
 for record in latest:
-    if record.status.value != "queued" or record.request.engine_id != "sd-realvis":
+    if record.status.value != "queued" or record.request.engine_id != "sana-multiling":
         failures.append(f"任务状态/引擎异常：{record.status.value} {record.request.engine_id}")
 seeds = {record.request.parameters.get("seed") for record in latest}
 if len(seeds) != 4 or None in seeds:

@@ -1,4 +1,4 @@
-# Chained acceptance waiter: SD images -> Wan2.1 video -> ACE-Step music.
+# Chained acceptance waiter: Sana images -> Wan2.1 video -> ACE-Step music.
 # Each inner script self-waits for free resources (2h window) and exits 0 only on real pass.
 # Honest by design: on failure nothing is changed; rounds are logged separately.
 param([int]$MaxRounds = 48)
@@ -7,7 +7,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $loopLog = Join-Path $root 'logs\acceptance_loop_turn40.log'
 "=== chain start $(Get-Date -Format 'yyyy-MM-dd HH:mm') ===" | Tee-Object -FilePath $loopLog -Append
 
-foreach ($step in @('sd', 'video', 'music')) {
+foreach ($step in @('image', 'video', 'music')) {
     for ($r = 1; $r -le $MaxRounds; $r++) {
         "=== $step acceptance round $r $(Get-Date -Format 'HH:mm') ===" | Tee-Object -FilePath $loopLog -Append
         $ps1 = Join-Path $root ("scripts\acceptance_{0}.ps1" -f $step)
@@ -24,4 +24,4 @@ foreach ($step in @('sd', 'video', 'music')) {
         }
     }
 }
-"ACCEPTANCE CHAIN COMPLETE (SD + VIDEO + MUSIC) $(Get-Date -Format 'yyyy-MM-dd HH:mm')" | Tee-Object -FilePath $loopLog -Append
+"ACCEPTANCE CHAIN COMPLETE (IMAGE + VIDEO + MUSIC) $(Get-Date -Format 'yyyy-MM-dd HH:mm')" | Tee-Object -FilePath $loopLog -Append

@@ -23,9 +23,14 @@ class ConfigStore:
             # 自动另存目录：留空＝只存项目内 output\；填了则每次生成完成后再复制一份
             # 到这个目录（用户可以选本地硬盘任意位置，包括移动盘）。手动「另存为」不受它影响。
             "auto_save_dir": "",
-            # 真实生成引擎（Wan2.1 视频）需用户确认模型下载/许可后才启用；默认关闭。
-            # 文生图 / 图生图 / AI 音乐的引擎已按「≤6GB 峰值显存 + 中英文 Prompt + 权重可商用」
-            # 三条要求下架，对应的 venv 与权重配置键一并移除（旧 config.json 里残留的键会被忽略）。
+            # 真实生成引擎需用户确认模型下载/许可后才启用；默认关闭。
+            # 三个模态都在岗：文生图 sana-multiling（Sana-1.6B 多语言版）、
+            # 图生图 wan-i2i 与视频 wan-t2v / wan-i2v（Wan2.1-VACE）、
+            # AI 音乐 ace-step-15（ACE-Step 1.5）——都按「≤6GB 峰值显存 +
+            # 中英文 Prompt + 权重可商用」三条要求选型。已下架的是 sd-realvis（SD1.5 后备，
+            # 保留代码与权重但不注册）和 wan-t2i（2026-11-10 从文生图撤下）；
+            # 旧 config.json 里残留的 sd_* 一类的键不在 defaults 里，下一次 save() 会被直接丢掉
+            # （不报错，也不会再生效）——它们对应的引擎本来就不再注册。
             "engines_enabled": False,
             # 视频引擎（Wan2.1 wan-t2v / wan-i2v）的环境与权重目录。
             # 之前 defaults 里没有这两个键：_validate 只遍历 defaults，用户手工
@@ -33,9 +38,32 @@ class ConfigStore:
             # save() 时被静默删掉，设置页也永远看不见它们（换机器/换盘符时无解）。
             "video_venv_python": "",
             "video_model_dir": str(Path(__file__).resolve().parents[2] / "models" / "wan2.1"),
-            # Web 前端服务固定监听 127.0.0.1:8765（仅本机可访问）。
+            # 文生图引擎（Sana-1.6B 多语言版 sana-multiling）的环境与权重目录。
+            # 同样必须写进 defaults：app/engine_registration.py 注册时读这几行，
+            # 而 _validate 只遍历 defaults——键不在 defaults 里，用户手工写进
+            # config.json 的这行会在下一次 save() 时被丢掉（换机器/换盘符时无解）。
+            "image_venv_python": "",
+            "image_model_dir": str(Path(__file__).resolve().parents[2] / "models" / "sana-multiling"),
+            # AI 音乐引擎（ACE-Step 1.5）的环境、代码仓库与权重目录，同一个道理。
+            "music_venv_python": "",
+            "music_repo_dir": str(Path(__file__).resolve().parents[2] / "vendor" / "ACE-Step-1.5"),
+            "music_model_dir": str(Path(__file__).resolve().parents[2] / "models" / "ace-step-1.5"),
+            # ACE-Step 的 5Hz 语言模型名与单个 worker 的任务数上限（注册时读取）。
+            "music_lm_model": "acestep-5Hz-lm-1.7B",
+            "music_max_tasks_per_worker": 4,
+            # Web 前端服务默认监听 127.0.0.1:8765（仅本机可访问）。桌面端自己不监听任何端口，
+            # 所以两端不会互抢端口；会抢的只有「别的程序已经占着这个端口」。
             "web_host": "127.0.0.1",
             "web_port": 8765,
+            # 端口被别人占了怎么办：True = 往后挪一格接着试（最多五格），并把真实端口写进
+            # logs\web-console.port，浏览器打开那个地址；False = 直接报错退出，不擅自换端口。
+            # 换端口只发生在 8765 确实被人占着的时候，不会今天 8765、明天 8770 乱跳。
+            "web_port_fallback": True,
+            # 桌面端启动时顺手把网页控制台一起带起来（app/bootstrap.py:start_web_console）。
+            # 两端共用同一份 config.json 与同一条 SQLite 队列：只开桌面端时 8765 上没人监听，
+            # 浏览器打开就是「连不上」，网页端看起来像坏了，所以默认带起来。
+            # 已经在监听就不重复起；退出时若还有任务在跑就不关它。想关掉：改成 false。
+            "web_autostart": True,
             # 提示词助手 / 智能体聊天：只连本机 OpenAI 兼容大模型端点，
             # 置空或连接失败时自动退回规则路由 + 诚实降级文案，绝不编造回复。
             # 「AI 智能体」的大模型不再依赖 Ollama：权重（GGUF）放在项目内
@@ -66,6 +94,7 @@ class ConfigStore:
     _INT_RANGES: dict[str, tuple[int, int]] = {
         "web_port": (1, 65535),
         "llm_timeout_seconds": (15, 900),
+        "music_max_tasks_per_worker": (1, 32),
     }
     # 非路径的普通字符串键（不做 Path 展开，允许留空表示"未配置"）。
     _FREE_TEXT_KEYS = frozenset(
@@ -75,12 +104,19 @@ class ConfigStore:
             "llm_model",
             "llm_model_path",
             "ui_language",
+            # ACE-Step 的 5Hz 语言模型名，不是磁盘路径，不能走 Path 展开。
+            "music_lm_model",
         }
     )
     # 允许留空的字符串键。
     _OPTIONAL_KEYS = frozenset(
         {
             "video_venv_python",
+            # 三个模态的 venv 解释器都允许留空：留空＝用项目自带默认环境
+            # （engine_registration 里的 default_*_venv_python），换机器时才看得懂。
+            "image_venv_python",
+            "music_venv_python",
+            "music_lm_model",
             "llm_model",
             "llm_endpoint",
             "llm_model_path",

@@ -1,7 +1,7 @@
 # 辰鹄 AI 创作中心架构提案
-> **2026-11-08 更新（读前必看）**：图像引擎已从 FLUX.1-schnell 换成 **SD1.5 精调 RealVis V5.1 + sd-vae-ft-mse + LCM-LoRA**（引擎 id `sd-realvis` / `sd-realvis-i2i`，磁盘 4.41 GB，真机显存峰值 1.88-2.09 GB）；FLUX 的权重、引擎代码与专用脚本**已全部删除**。本文中把 FLUX 当作现役模型的段落属于**历史记录**；许可与选型结论以 `LICENSES.md`、`docs\LICENSE_AUDIT.md` 文末「2026-11-08 增补」和 `README.md` 文末「FLUX 出局」一节为准。三条铁律：**可商用 / 中英文提示词 / 显存峰值 ≤6GB**。
+> **2026-11-10 更新（读前必看）**：文生图引擎再次换件，现职为 **Sana-1.6B 多语言版**（引擎 id `sana-multiling`，仓库 `Efficient-Large-Model/Sana_1600M_1024px_MultiLing_diffusers`，fp16 三件权重磁盘 9.06 GB，走逐模块 CPU 换入）。图生图由 **Wan2.1-VACE-1.3B**（引擎 id `wan-i2i`）负责，与视频共用 `.venv-video` 与 `models\wan2.1`。历史上的 FLUX.1-schnell（2026-11-08 因显存铁律整套删除）与 SD1.5 精调 RealVis（2026-11-10 因 CLIP 不原生支持中文退选，代码与权重保留但**不注册、界面上看不到**）**都不是现役能力**；本文中把 FLUX / SD1.5 当作现役的段落属于**历史记录**。许可与选型结论以 `LICENSES.md`、`docs\LICENSE_AUDIT.md` 文末增补、`docs\ENGINE_RESEARCH.md` 文末「2026-11-10 文生图再次选型」和 `README.md` 同名章节为准。三条铁律不变：**可商用 / 中英文提示词 / 显存峰值 ≤6GB**。
 
-**状态：Phase 1 桌面骨架、Phase 2 任务服务已完成验收；Phase 3 真实引擎已接入（FLUX 本机真实出图、ACE-Step 权重就绪待端到端验收、Anima 权重待用户决策）。** 本文区分已实现服务与待后续阶段完成的推理能力。
+**状态：Phase 1 桌面骨架、Phase 2 任务服务已完成验收；Phase 3 真实引擎已接入（Sana 文生图、Wan2.1 视频与图生图、ACE-Step 音乐；Sana 的真机显存峰值尚未实测，验收脚本已就位）。** 本文区分已实现服务与待后续阶段完成的推理能力。
 
 ## 目标
 
@@ -18,7 +18,7 @@
   ├─ HardwareService：GPU、VRAM、RAM、磁盘观察与运行前检查
   ├─ SQLite：迁移、队列、历史记录
   └─ Engine adapters（每引擎独立 venv / 子进程）
-       ├─ 图片：Diffusers + FLUX.1-schnell（已集成 · Apache-2.0）
+       ├─ 图片：文生图 Diffusers + Sana-1.6B 多语言版（引擎 sana-multiling，`.venv-image` 独立 worker）；图生图 Wan2.1-VACE-1.3B（引擎 wan-i2i，与视频共用 `.venv-video` 与 `models\wan2.1`）
        ├─ 视频：Wan2.1-T2V-1.3B（wan-t2v）/ Wan2.1-VACE-1.3B（wan-i2v），.venv-video 独立 worker（2026-11-05 接入；Anima 引用已移除）
        └─ 音乐：ACE-Step v1.5 adapter（已集成 · MIT）
 ```
@@ -89,8 +89,9 @@ queued/preparing/running -> cancelled
 
 ## Phase 3 实际落地（2026-11-05 更新）
 
-- 真实引擎已接入并经 `ProcessEngineAdapter` JSONL IPC 运行在独立 venv：FLUX.1-schnell 图像（`.venv-image`）、Wan2.1 视频（`wan-t2v`/`wan-i2v`，`.venv-video`）、ACE-Step 1.5 音乐（`.venv-music`）；视频权重（HF 快照，两仓库共享 blobs 物理 44.18 GB）在 `models/wan2.1` 离线加载，权重缺失时 health_check 诚实报错，不伪造；原 Anima 引用已于 2026-11-05 整体移除（真实上游非商业许可）；权重按 SHA-256/safetensors 逐文件校验，主进程零 torch。
-- FLUX 已产出多张真实图（英文提示词批 + Web 产物预览实测 200）；中文提示词端到端出图、ACE-Step 端到端音频的真机验收脚本已就位（`scripts\acceptance_flux.ps1` 含中文步骤），执行排队等待显存窗口。
+- 真实引擎已接入并经 `ProcessEngineAdapter` JSONL IPC 运行在独立 venv：文生图 Sana-1.6B 多语言版（引擎 `sana-multiling`，`.venv-image`）、图生图 Wan2.1-VACE-1.3B（引擎 `wan-i2i`，与视频同一 `.venv-video`、同一 `models\wan2.1`）、Wan2.1 视频（`wan-t2v`/`wan-i2v`）、ACE-Step 1.5 音乐（`.venv-music`）；视频/图生图权重（HF 快照，两仓库共享 blobs 物理 44.18 GB）在 `models\wan2.1` 离线加载，Sana 权重在 `models\sana-multiling`（只取 fp16 变体，磁盘实测 9.06 GB），权重缺失时 health_check 诚实报错，不伪造；原 Anima 引用已于 2026-11-05 整体移除（真实上游非商业许可）；历史上的 FLUX.1-schnell（2026-11-08 因显存铁律整套删除）与 SD1.5 精调 RealVis（2026-11-10 因 CLIP 不原生支持中文退选）都不在注册表里；权重按 SHA-256/safetensors 逐文件校验，主进程零 torch。
+- （历史）2026-11-05 前后 FLUX 曾产出多张真实图（英文提示词批 + Web 产物预览实测 200），配套验收脚本 `scripts\acceptance_flux.ps1` 已随 FLUX 整套删除。现行文生图真机验收为 `scripts\acceptance_image.py` / `.ps1` / `.bat`：两档（1024×1024、1920×1088）逐档打印实测峰值，超过 `--peak-limit`（默认 6000MB）立即停止后续档位；开跑前还要求空闲显存 ≥6144MB、空闲物理内存 ≥16000MB，门槛不到就继续等，不伪造通过。**Sana 的 ≤6GB 峰值目前只是按权重体积推算的预期值，尚未真机实测**（本机显存被常驻大模型占满），跑 `scripts\acceptance_image.bat` 即得每档实测数。
+- 三模态验收链条 `scripts\acceptance_chain.ps1` 现按 **image → video → music** 顺序执行（依次调用 `acceptance_image.ps1` / `acceptance_video.ps1` / `acceptance_music.ps1`），门槛不到就一直等窗口，绝不把「没跑」写成「跑过」。中英混合提示词的验证落在 `acceptance_image.py` 的第二档（1920×1088，走放大路径）。
 - 引擎环境统一与兜底（2026-11-05）：`register_production_engines` 解析 `image_venv_python` / `music_venv_python` 时，若配置值指向不存在的解释器，会记录告警并回退到项目默认 `.venv-image` / `.venv-music`（`default_image_venv_python` / `default_music_venv_python`），避免 worker 误用系统 Python；配置值为空时本就直接用默认环境。排查中文出图链路时确认过：曾出现的系统 Python worker 属旧代码进程遗留，现行注册逻辑不会落到系统解释器。
 - 垫图（`init_image_path`）输入校验（2026-11-05）：图生图/图生视频的垫图必须是**盘符开头、真实存在、后缀受支持的具体图片文件**。三层拦截：桌面 `creation_page._ref_path_error`（composer 挂载与高级参数两处，明确提示「不能是文件夹」）、网页 `app.js` 先行拦截目录尾巴与不支持后缀、Web 后端 `app/web/server.py` `_submit_task` 统一预检（非空/绝对/非目录/存在/后缀白名单）并归一化路径；引擎侧仍保留「输入文件不存在」作最后防线。全程不猜测目录、不伪造结果。
 - 桌面端已重构为 MJ 同款三栏创作界面（会话栏 + 五模式 Tab + 参数面板 + 批次流/lightbox/toast，详见根 `README.md` 同名章节与 `docs/MODULES.md` §5）；与 Web 控制台共用队列、同一 worker 协议与同一套提交校验语义。
@@ -103,11 +104,21 @@ queued/preparing/running -> cancelled
 
 - ~~`app/web_ui.py` 捕获模型异常后构造灰色占位图~~ → 文件已删除；现行 Web 控制台（`app/web/server.py`）绝不生成占位图，失败任务诚实带 `error_message`。
 - ~~`app/scheduler.py` `asyncio.sleep` 模拟完成、硬编码可用显存~~ → 文件已删除；现行 `TaskService`/`app.core.hardware` 只报告真实测得数据或 unavailable。
-- ~~旧 `app/engine/image/flux.py` 下载失败返回占位结果~~ → 已重写：离线快照加载（`HF_HUB_OFFLINE=1`）、生成前输出目录解析、空/异常提示词诚实报错，绝不占位。
+- ~~旧 `app/engine/image/flux.py` 下载失败返回占位结果~~ → 先重写为离线快照加载（`HF_HUB_OFFLINE=1`）、生成前输出目录解析、空/异常提示词诚实报错，绝不占位；该文件与 FLUX 权重最终已于 **2026-11-08 整套删除**，现役文生图实现是 `app/engine/image/sana.py`（适配器 `app/tasks/sana_worker.py`）。
 - ~~`app/main.py`、`requirements.txt` 重复冲突~~ → 已清理；入口唯一（桌面 `app.bootstrap`、Web `app.web.server`）。
 - ~~无生产 adapter / 真实引擎未实现~~ → 已实现三模态生产 adapter 与两个独立 venv worker（见上节）。
 
-结论修订：桌面与 Web 两端现在都提供真实本地 AI 生成（引擎注册即权重与依赖已校验）；“未验证即禁用”的安全策略由**引擎注册门槛**实现——venv 或权重缺失时引擎不注册（视频引擎缺 `.venv-video`/`models/wan2.1` 时同样不注册，UI 如实提示搭建与下载脚本），UI 与 API 拒绝提交，全程无模拟输出。
+结论修订：桌面与 Web 两端现在都提供真实本地 AI 生成（引擎注册即权重与依赖已校验）；“未验证即禁用”的安全策略由**引擎注册门槛**实现——venv 或权重缺失时引擎不注册（文生图缺 `.venv-image` 或 `models\sana-multiling` 时不注册 `sana-multiling`，UI 如实提示用 `scripts\verify_env.py` 自检、`scripts\download_sana_weights.py` 补权重；视频与图生图缺 `.venv-video`/`models/wan2.1` 时同样不注册，UI 如实提示搭建与下载脚本），UI 与 API 拒绝提交，全程无模拟输出。
+
+## 文生图资源边界（2026-11-10 换型后）
+
+图像链路的硬约束都写在代码里、由引擎自己执行，不在 UI 里做二次猜测：
+
+- **对齐与预算**（`app/engine/image/plan.py` 的 `SANA_PROFILE`）：宽高必须是 **32 的倍数**（DC-AE 是 32 倍下采样，SD1.5 那套 8 倍数与分块重绘在这里不成立），单边上限 2048；单遍像素预算 **1,100,000 px**（1024×1024 刚好在预算内，官方示例也推荐 1024×1024），目标像素硬上限 **4,200,000 px**（2048×2048）。超出单遍预算的档位（如 1920×1088）走「预算内出底图 → Lanczos 放大」，元数据如实写 `upscaled=true`、`tiles=0`，不谎称高清重绘。
+- **参数口径**：steps 默认 **20**，引擎按 **10-40** 夹取（Sana 官方示例值，不是 LCM 的 1-12 档）；CFG 固定 **4.5** 常开，因此负向提示词始终真正参与引导，不存在「guidance=1 时负向词无效」的坑；提示词原样进编码器，`prompt_translated` 恒为 `false`（不再需要 SD1.5 那层中英桥接）。
+- **显存与内存闸门**（`app/engine/image/sana.py` + `app/engine/memprobe.py`）：默认 fp16 + **逐模块 CPU 换入**，任一时刻显存里只有当前一件权重（最大单件是 Gemma-2-2B 编码器 4.99GB）；空闲显存 <5120MB 自动退到**逐层换入**（峰值更低但慢约两三倍），<1500MB 直接拒绝并点名当前占着显存的进程；加载权重要求空闲物理内存 **≥16GB**（fp16 三件 9.06GB 要先读进内存，不够就会被系统杀掉、只在日志里留下断在半路）。两道门槛都可用 `CHENGUAI_SANA_MIN_FREE_MB` / `CHENGUAI_SANA_MIN_FREE_RAM_MB` 临时压低，用于排障。
+- **图生图不在 `.venv-image` 里**：`wan-i2i` 走 `app/tasks/video_worker.py`（`CHENGUAI_VIDEO_ENGINE_ID=wan-i2i`、`CHENGUAI_VIDEO_MODEL_CACHE_DIR=models\wan2.1`），480p 档、16 倍数、像素预算 459264px（`app/engine/video/budget.py` 的 `MAX_PIXELS`，全仓唯一一份）；`CHENGUAI_DISABLE_MODALITIES` 里 `image` 只关掉 `sana-multiling` 与 `wan-i2i`，与 `video` 开关互不牵连。
+- **SD1.5 一整套**（`app/engine/image/sd15.py`、`app/tasks/sd_worker.py`、`models\sd-realvis`/`sd-vae-ft-mse`/`lcm-lora-sd15`）**保留在盘上但不注册**：不在能力清单里、界面上看不到，想自行验证需手工注册。留作后备的理由是它是历史上唯一实测过峰值的出图路径（4359MB）。分块高清重绘（`app/engine/image/hires.py`）只服务 SD1.5 路径，Sana 不做分块重绘（`plan.py` 只借用 `hires.fit_within` 这个纯计算函数）。
 
 ## 设计决策门槛
 

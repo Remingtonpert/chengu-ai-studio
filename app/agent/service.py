@@ -38,9 +38,10 @@ from app.tasks.models import TaskRequest
 
 logger = logging.getLogger("chenguai.agent")
 
-# 2026-11-09 重新选型记录：文生图 / 图生图改走 Wan2.1 1.3B 单帧（wan-t2i / wan-i2i，
-# 一次 1 张，旧 SD1.5 一次 4 张的 IMAGE_BATCH_SIZE 随旧引擎退场），AI 音乐保留
-# ACE-Step 1.5（CPU 换入档）。三类生成（图片/视频/音乐）与智能体共用同一条串行队列。
+# 2026-11-10 换型记录：文生图换成 Sana-1.6B 多语言（引擎 sana-multiling，走 .venv-image 子进程），
+# 图生图保留 Wan2.1 VACE（wan-i2i，单帧出图），文生图不再是 Wan 的单帧副作用（wan-t2i 已下架）。
+# 一次 1 张，旧 SD1.5 一次 4 张的 IMAGE_BATCH_SIZE 随旧引擎退场；AI 音乐保留 ACE-Step 1.5
+# （CPU 换入档）。三类生成（图片/视频/音乐）与智能体共用同一条串行队列。
 
 
 def _rand_seed() -> int:
@@ -53,18 +54,20 @@ def _rand_seed() -> int:
 
 
 # 各生成通道优先使用的引擎 id；注册表里的 id 若不同，再按关键字模糊匹配。
-# 图片与视频都落在 Wan2.1（t2i/i2i 是单帧档），音乐落在 ACE-Step。
+# 文生图落在 Sana，图生图/视频落在 Wan2.1，音乐落在 ACE-Step。
 _ENGINE_CANDIDATES: dict[str, tuple[str, ...]] = {
     "t2v": ("wan-t2v",),
     "i2v": ("wan-i2v",),
-    "t2i": ("wan-t2i",),
+    "t2i": ("sana-multiling",),
     "i2i": ("wan-i2i",),
     "music": ("ace-step-15",),
 }
+# 关键字兜底：t2i 必须带 "sana"，否则注册表里换了 id 就再也匹配不上（"wan" 对
+# sana-multiling 这个 id 完全不起作用，兜底会失效）。
 _ENGINE_KEYWORDS: dict[str, tuple[str, ...]] = {
     "t2v": ("t2v", "wan"),
     "i2v": ("i2v", "wan"),
-    "t2i": ("t2i", "wan"),
+    "t2i": ("t2i", "sana"),
     "i2i": ("i2i", "wan"),
     "music": ("music", "ace"),
 }

@@ -118,6 +118,8 @@ class TileBase(QFrame):
     # 手动「另存」：产物本来就在项目内 output\（本工具即时显示的那份），这个信号让
     # 创作页弹目录/文件名选择框，再复制一份到用户挑的位置（对应网页端的「另存」）。
     saveRequested = Signal(str)
+    # 「▶ 播放」：产物在工具内的播放窗里放，不交给系统播放器（对齐网页端灯箱）。
+    playRequested = Signal(str)
 
     def __init__(self, rec: TaskRecord, tile_w: int, tokens: dict[str, str]) -> None:
         super().__init__()
@@ -382,7 +384,7 @@ class VideoTile(TileBase):
                 )
             )
         else:
-            image.setText("（首帧预览不可用，点“打开视频”观看）")
+            image.setText("没有首帧预览，点开仍可在工具内播放")
             image.setAlignment(Qt.AlignmentFlag.AlignCenter)
             image.setObjectName("mutedMsg")
         strip = QFrame(self)
@@ -391,14 +393,15 @@ class VideoTile(TileBase):
         strip_layout = QHBoxLayout(strip)
         strip_layout.setContentsMargins(8, 5, 8, 7)
         strip_layout.setSpacing(6)
-        open_button = QPushButton("▶ 打开视频", self)
+        open_button = QPushButton("▶ 播放", self)
         folder_button = QPushButton("📁 文件夹", self)
         save_button = self.save_button("⬇ 另存")
         for button in (open_button, folder_button):
             button.setObjectName("vuBtn")
+        open_button.setToolTip("在工具里的播放窗观看，不调用系统播放器")
         if video_path:
             open_button.clicked.connect(
-                lambda: open_local_file(video_path)
+                lambda: self.playRequested.emit(self.task_id)
             )
             folder_button.clicked.connect(
                 lambda: reveal_in_explorer(video_path)
@@ -473,6 +476,9 @@ class MusicTile(TileBase):
         )
         meta = QLabel(meta_text, self)
         meta.setObjectName("mediaMeta")
+        # 播放失败的原因写在这里：卡片上不能只出现「按钮按下去没反应」。
+        self._meta = meta
+        self._meta_base = meta_text
         text_column.addWidget(name)
         text_column.addWidget(meta)
         layout.addLayout(text_column, 1)
@@ -505,13 +511,28 @@ class MusicTile(TileBase):
             self._player.durationChanged.connect(self._on_duration)
             self._player.playbackStateChanged.connect(self._on_state)
             self._player.errorOccurred.connect(self._on_error)
+        elif audio_path:
+            self._note("本机缺少 Qt 播放组件，点 ▶ 会改用系统播放器")
+
+    def _note(self, text: str) -> None:
+        """把播放为什么放不出来写在卡片上，不靠用户猜。"""
+        if getattr(self, "_meta", None) is None:
+            return
+        self._meta.setText(f"{self._meta_base} · {text}")
+        self._meta.setToolTip(text)
 
     # ------------------------------------------------------------------ 播放
     def _toggle_play(self) -> None:
         if self._player is None:
             audios = output_paths(self.rec, AUDIO_SUFFIXES)
-            if audios:
-                open_local_file(audios[0])
+            if not audios:
+                self._note("音频文件已不存在")
+                return
+            if not Path(audios[0]).is_file():
+                self._note(f"音频文件已不存在：{Path(audios[0]).name}")
+                return
+            self._note("已改用系统播放器播放")
+            open_local_file(audios[0])
             return
         if self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self._player.pause()
@@ -525,14 +546,22 @@ class MusicTile(TileBase):
             self.play_button.setText("▶")
 
     def _on_duration(self, duration_ms: int) -> None:
+        player = self._player
+        if player is None:
+            return
         if not self.seek.isSliderDown():
             self.seek.setRange(0, max(0, int(duration_ms)))
-        self._set_time(self._player.position(), duration_ms)
+        self._set_time(player.position(), duration_ms)
+        if int(duration_ms) <= 0:
+            self._note("读不到时长，音频文件可能不完整")
 
     def _on_position(self, position_ms: int) -> None:
+        player = self._player
+        if player is None:
+            return
         if not self.seek.isSliderDown():
             self.seek.setValue(int(position_ms))
-        self._set_time(position_ms, self._player.duration())
+        self._set_time(position_ms, player.duration())
 
     def _set_time(self, position_ms: int, duration_ms: int) -> None:
         def fmt(ms: float) -> str:
@@ -545,9 +574,16 @@ class MusicTile(TileBase):
         if self._player is not None:
             self._player.setPosition(int(self.seek.value()))
 
-    def _on_error(self, _error, message: str) -> None:
-        self.time_label.setText("内嵌播放失败，点 ▶ 用系统播放器打开")
-        self._player = None  # fall back: ▶ opens the system player instead
+    def _on_error(self, _error, message: str = "") -> None:
+        # 不静默失效：先写清楚为什么放不出来，再保留系统播放器这条退路。
+        detail = str(message or "").strip()
+        self._note(
+            "内嵌播放放不出来"
+            + (f"（{detail}）" if detail else "（多半是缺解码器）")
+            + "，点 ▶ 改用系统播放器"
+        )
+        self.time_label.setText("0:00")
+        self._player = None  # 退路：点 ▶ 走系统播放器
         self.play_button.setEnabled(True)
 
     def stop(self) -> None:

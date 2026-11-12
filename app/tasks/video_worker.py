@@ -1,13 +1,14 @@
 """Wan2.1 引擎的任务系统适配器（在 .venv-video 的 worker 子进程内运行）
 
-同一份 worker 承载四个引擎：视频 wan-t2v / wan-i2v（mp4）与图片 wan-t2i / wan-i2i
-（PNG，单帧模式，权重与视频共用 models/wan2.1）。按注入的引擎 ID 决定任务类型。
+同一份 worker 承载三个引擎：视频 wan-t2v / wan-i2v（mp4）与图生图 wan-i2i
+（PNG，VACE 参考重绘，权重与视频共用 models/wan2.1）。按注入的引擎 ID 决定任务类型。
+文生图不在这里：2026-11-10 起换成 Sana-1.6B 多语言版，见 app/tasks/sana_worker.py。
 
 用法（由 bootstrap 通过 ProcessEngineAdapter 启动）:
     python -m app.tasks.process_worker --adapter-factory app.tasks.video_worker:create_adapter
 
 环境变量（ProcessEngineAdapter 会把桌面/Web 进程的环境透传给子进程）:
-    CHENGUAI_VIDEO_ENGINE_ID       wan-t2v / wan-i2v / wan-t2i / wan-i2i（必需，注册时按引擎分别注入）
+    CHENGUAI_VIDEO_ENGINE_ID       wan-t2v / wan-i2v / wan-i2i（必需，注册时按引擎分别注入）
     CHENGUAI_VIDEO_MODEL_CACHE_DIR Wan 权重缓存根（HF 缓存布局，默认 ./models/wan2.1）
     CHENGUAI_OUTPUT_DIR            生成结果输出目录（默认 <data_root>/Output）
 """
@@ -44,12 +45,11 @@ def _load_wan_engine_symbols() -> tuple[Any, Dict[str, Any], Any]:
 # wan-t2v 不接受参考图；wan-i2v 必须带首帧（init_image_path）
 _ALLOWED_PARAMS_T2V = {"width", "height", "num_frames", "steps", "seed", "negative_prompt"}
 _ALLOWED_PARAMS_I2V = _ALLOWED_PARAMS_T2V | {"init_image_path"}
-# 图片档（单帧）没有帧数概念；wan-i2i 必须带参考图
-_ALLOWED_PARAMS_T2I = {"width", "height", "steps", "seed", "negative_prompt"}
-_ALLOWED_PARAMS_I2I = _ALLOWED_PARAMS_T2I | {"init_image_path"}
+# 图片档只剩图生图（单帧、无帧数概念，必须带参考图）
+_ALLOWED_PARAMS_I2I = {"width", "height", "steps", "seed", "negative_prompt", "init_image_path"}
 
 _VIDEO_ENGINE_IDS = ("wan-t2v", "wan-i2v")
-_IMAGE_ENGINE_IDS = ("wan-t2i", "wan-i2i")
+_IMAGE_ENGINE_IDS = ("wan-i2i",)
 _ALL_ENGINE_IDS = _VIDEO_ENGINE_IDS + _IMAGE_ENGINE_IDS
 
 
@@ -117,7 +117,8 @@ class WanTaskAdapter:
             raise ValueError("提示词不能为空")
         params = request.parameters or {}
         if self.is_image:
-            allowed = _ALLOWED_PARAMS_I2I if self._is_ref_engine else _ALLOWED_PARAMS_T2I
+            # 图片档现在只有 wan-i2i（图生图）：文生图已迁到 Sana（app/tasks/sana_worker.py）。
+            allowed = _ALLOWED_PARAMS_I2I
             ref_label = "图生图"
         else:
             allowed = _ALLOWED_PARAMS_I2V if self._is_ref_engine else _ALLOWED_PARAMS_T2V
@@ -138,8 +139,7 @@ class WanTaskAdapter:
                 raise ValueError(f"{ref_label}垫图文件不存在：{init}")
         elif init is not None:
             raise ValueError(
-                f"文生{'图' if self.is_image else '视频'}不接受参考图："
-                f"请改用{'图生图' if self.is_image else '图生视频'}引擎（wan-i2i / wan-i2v）"
+                "文生视频不接受参考图：请改用「图生视频」板块（引擎 wan-i2v）"
             )
 
     async def generate(self, request: TaskRequest) -> TaskResult:
@@ -181,8 +181,14 @@ class WanTaskAdapter:
             seed=params.get("seed"),
             negative_prompt=params.get("negative_prompt"),
         )
+        outputs = [str(result["path"])]
+        preview = str(result.get("preview") or "").strip()
+        if preview and Path(preview).is_file():
+            # 封面图排在 mp4 之后：两端取主产物都是按后缀筛的（视频取 mp4、另存也取 mp4），
+            # 这张 -first.png 只负责在卡片上当封面显示，不会被当成视频本体。
+            outputs.append(preview)
         return TaskResult(
-            output_files=(result["path"],),
+            output_files=tuple(outputs),
             metadata={
                 "status": result["status"],
                 "seed": result.get("seed"),

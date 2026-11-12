@@ -146,13 +146,23 @@ HELP_TEXT = (
 # （2026-11-09 重新选型后图片与音乐已恢复在岗，原先的「已下架」告知文案已移除。）
 
 # 参数抠取：比例 / 时长 / 种子 / 步数 / BPM / 纯音乐 / 人声语言
-_ASPECT_VIDEOS = {
-    # 与 app/engine/video/wan.py 的 _MAX_PIXELS = 832*480*1.15 ≈ 0.46MP 同一份预算：
-    # Wan2.1 1.3B 是 480p 档模型，超预算引擎会自动缩到当前档位上限。
-    # 图片（wan-t2i / wan-i2i 单帧）与视频共用这份预算和这张表。
-    # 桌面端参数面板的 ASPECT_CHIPS_VIDEO 用的是同一组尺寸，两端不能各写一套。
+_ASPECT_WAN = {
+    # 与 app/engine/video/budget.py 的 MAX_PIXELS = 832*480*115//100 = 459264 ≈ 0.46MP 同一份预算：
+    # Wan2.1 1.3B 是 480p 档模型；超预算**不会自动降档**，而是在提交前就被挡下，
+    # 并把这一档的真实上限讲成具体数字（token 上限 MAX_TOKENS 也在那份 budget.py 里）。
+    # 图生图（wan-i2i 单帧）与视频共用这份预算和这张表；文生图走 Sana 的 1024 级表
+    # （_ASPECT_SANA），不再压到 480p。
+    # 桌面端参数面板的 ASPECT_CHIPS_VIDEO 与网页端同名表用的是同一组尺寸，三端不能各写一套。
     "1:1": (624, 624), "2:3": (480, 720), "3:2": (720, 480),
     "16:9": (832, 480), "9:16": (480, 832), "4:3": (640, 480), "3:4": (480, 640),
+}
+_ASPECT_SANA = {
+    # 文生图引擎 sana-multiling（Sana-1.6B 多语言版）：按 32 的倍数出图（DC-AE 32 倍
+    # 下采样），单遍像素预算 1_100_000（≈1024 级直出），目标硬上限 4_200_000（2048 级）。
+    # 数字与 app/engine/image/plan.py 的 SANA_* 和桌面端 ASPECT_CHIPS_T2I 同一份口径，
+    # 两端不能各写一套。1080p（1920×1088）超过单遍预算，引擎按预算出底图再放大。
+    "1:1": (1024, 1024), "16:9": (1152, 640), "9:16": (640, 1152),
+    "4:3": (1152, 864), "3:4": (864, 1152), "2:3": (768, 1152), "3:2": (1152, 768),
 }
 _ASPECT_WORDS = {
     "竖版": "9:16", "竖图": "9:16", "竖屏": "9:16", "手机壁纸": "9:16",
@@ -273,12 +283,24 @@ def _document_secondary_hit(haystack: str, chosen_format: str) -> tuple[str, str
 
 
 def _normalize_aspect(raw: str) -> str:
+    # 只判比例词本身合不合法：_ASPECT_WAN 与 _ASPECT_SANA 的比例键完全一致
+    # （1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 2:3 / 3:2），只是各自落到不同的尺寸档，
+    # 所以按 Wan 表判与按 Sana 表判等价；真正的尺寸在 _extract_params 里按引擎选表。
     compact = re.sub(r"\s+", "", raw).replace("：", ":")
-    return compact if compact in _ASPECT_VIDEOS else ""
+    return compact if compact in _ASPECT_WAN else ""
 
 
-def _extract_params(text: str, modality: str) -> tuple[str, dict[str, Any], list[str]]:
-    """从话里抠参数，返回（去掉参数词后的描述, 参数字典, 说明）。"""
+def _extract_params(
+    text: str, modality: str, aspect_table: dict[str, tuple[int, int]] | None = None
+) -> tuple[str, dict[str, Any], list[str]]:
+    """从话里抠参数，返回（去掉参数词后的描述, 参数字典, 说明）。
+
+    ``aspect_table``：比例词落到哪张尺寸表——文生图（sana-multiling）传 ``_ASPECT_SANA``，
+    图生图（wan-i2i）与视频传 ``_ASPECT_WAN``；缺省按 Wan 档（非图片模态就是这样）。
+    """
+
+    table = aspect_table or _ASPECT_WAN
+
     remaining = text
     params: dict[str, Any] = {}
     notes: list[str] = []
@@ -310,8 +332,9 @@ def _extract_params(text: str, modality: str) -> tuple[str, dict[str, Any], list
         if modality == "music":
             notes.append("比例词对音乐不适用，已忽略")
         else:
-            # 图片与视频共用同一份 480p 预算（wan.py _MAX_PIXELS），见 _ASPECT_VIDEOS。
-            table = _ASPECT_VIDEOS
+            # 尺寸按调用方选好的表取：文生图（sana-multiling，见 _ASPECT_SANA）走 1024 级档；
+            # 图生图与视频（wan-i2i / wan-t2v / wan-i2v）共用同一份 480p 预算
+            # （wan.py _MAX_PIXELS），见 _ASPECT_WAN。
             size = table.get(aspect)
             if size:
                 params["width"], params["height"] = size
@@ -492,8 +515,9 @@ def parse_command(message: str, *, has_ref_image: bool = False) -> AgentCommand:
     if doc_word and media_index < 0 and _first_hit(lowered, _DOCUMENT_HOWTO_WORDS):
         return AgentCommand(ACTION_CHAT, prompt=raw)
 
-    # 4) 生成目标：图片 / 视频 / 音乐都在岗（2026-11-09 重新选型：图片改走
-    #    Wan2.1 1.3B 单帧 wan-t2i / wan-i2i，音乐走 ACE-Step 1.5 CPU 换入档）。
+    # 4) 生成目标：图片 / 视频 / 音乐都在岗（图片：文生图走 sana-multiling（Sana-1.6B
+    #    多语言版，独立 .venv-image），图生图走 Wan2.1 1.3B 单帧 wan-i2i；
+    #    音乐走 ACE-Step 1.5 CPU 换入档）。
     #    判定次序不变：视频词最优先（「给这段视频配乐」仍算视频），其次音乐、图片。
     if video_word:
         modality, target = "video", video_word
@@ -534,8 +558,8 @@ def parse_command(message: str, *, has_ref_image: bool = False) -> AgentCommand:
         soft = _first_hit(lowered, _IMAGE_SOFT_VERBS)
         counter = _first_hit(lowered, _IMAGE_COUNTERS) if soft else ""
         if strong or drawn or (soft and counter):
-            # 明确的「画一张」意图：进图片通道（wan-t2i；带垫图的改图在分支 4 已按
-            # wants_edit 立案，不会掉到这里）。
+            # 明确的「画一张」意图：进图片通道（文生图 sana-multiling；带垫图的改图在
+            # 分支 4 已按 wants_edit 立案走 wan-i2i，不会掉到这里）。
             modality, target = "image", strong or soft or ""
             notes.append("话里有明确的画图说法（没有「图片」目标词），按文生图立案")
         else:
@@ -549,7 +573,16 @@ def parse_command(message: str, *, has_ref_image: bool = False) -> AgentCommand:
                 ),
             )
 
-    body, params, param_notes = _extract_params(raw, modality)
+    # 比例表按「这句话最终会交给哪个引擎」选：图片通道里，带垫图且明确要改画面的走
+    # 图生图 wan-i2i（480p 档，_ASPECT_WAN），其余走文生图 sana-multiling（1024 级，
+    # _ASPECT_SANA）。mode 在下面几步才最终定，但判定依据（有没有垫图、有没有改画面
+    # 意图）到这里已经齐了，所以先把表选好传进 _extract_params。
+    aspect_table = (
+        _ASPECT_WAN
+        if modality != "image" or (has_ref_image and wants_edit)
+        else _ASPECT_SANA
+    )
+    body, params, param_notes = _extract_params(raw, modality, aspect_table)
     notes.extend(param_notes)
     prompt = _strip_command_phrase(body, target)
     if not prompt:
@@ -597,10 +630,21 @@ def parse_command(message: str, *, has_ref_image: bool = False) -> AgentCommand:
         params.setdefault("width", 832)
         params.setdefault("height", 480)
     elif modality == "image":
-        # 单帧图片没有帧数概念；分辨率跟视频同一份 480p 预算（Wan 1.3B 档位上限）。
-        params.setdefault("width", 832)
-        params.setdefault("height", 480)
-        notes.append("图片按 Wan2.1 480p 档位出图（最高 832×480 级，比例词可选）")
+        # 单帧图片没有帧数概念，尺寸档位按引擎分两套：
+        # 文生图（sana-multiling，Sana-1.6B 多语言版）默认 1024×1024，按 32 的倍数出图，
+        # 单遍像素预算 1_100_000（≈1024 级直出），最高到 2048 级（超单遍预算按底图+放大）；
+        # 图生图（wan-i2i）仍跟视频同一份 480p 预算（Wan 1.3B 档位上限）。
+        if mode == "t2i":
+            params.setdefault("width", 1024)
+            params.setdefault("height", 1024)
+            notes.append(
+                "图片按 Sana-1.6B 多语言版 1024 级档位出图"
+                "（按 32 的倍数，最高 2048 级，比例词可选）"
+            )
+        else:
+            params.setdefault("width", 832)
+            params.setdefault("height", 480)
+            notes.append("图片按 Wan2.1 480p 档位出图（最高 832×480 级，比例词可选）")
     else:  # music：时长/BPM 在 _extract_params 里处理，缺省交给引擎默认值
         pass
 
@@ -637,8 +681,9 @@ def build_task_payload(
     """把 AgentCommand 转成 POST /api/tasks 需要的载荷。
 
     engine_ids 由调用方（服务端）按已注册引擎解析，键：t2i / i2i / t2v / i2v / music，
-    对应的引擎 id 现为 wan-t2i / wan-i2i / wan-t2v / wan-i2v / ace-step-15
-    （图片与视频共用 models/wan2.1 权重，音乐走 .venv-music）。
+    对应的引擎 id 现为 sana-multiling / wan-i2i / wan-t2v / wan-i2v / ace-step-15
+    （文生图走 .venv-image + models/sana-multiling；图生图与视频共用 .venv-video +
+    models/wan2.1；音乐走 .venv-music）。
     """
     if not command.is_generation:
         raise ValueError("不是生成类命令，无法建任务")
@@ -666,8 +711,10 @@ def system_prompt() -> str:
         "你只负责聊天、写文案、给创作建议（提示词写法、参数建议、构图与镜头语言）。"
         "不要声称自己能直接生成图片或视频——生成由本软件的引擎完成，用户可以直接在对话里输入生成命令。"
         "本软件目前有六个板块：AI智能体、文生图、图生图、文生视频、图生视频、AI音乐；"
-        "图片与视频都由 Wan2.1 1.3B 完成（480p 档位，图片是单帧），音乐由 ACE-Step 1.5 完成。"
-        "给建议时按这些引擎的实际档位说（比如图片最高 832×480 级），不要吹 720p、4K 这类做不到的规格。"
+        "文生图由 Sana-1.6B 多语言版完成（1024 级档位，按 32 的倍数，最高 2048 级），"
+        "图生图与视频由 Wan2.1 1.3B 完成（480p 档位，图生图是单帧），音乐由 ACE-Step 1.5 完成。"
+        "给建议时按这些引擎的实际档位说（比如文生图常用 1024×1024、图生图与视频最高 832×480 级），"
+        "不要吹 4K、8K 这类做不到的规格。"
         "回答简洁、直接、可用，默认中文；用户用英文提问就用英文回答；"
         "给文案时直接给成品，不要前后加解释。"
         "不确定的事情直说不确定，绝不编造。"

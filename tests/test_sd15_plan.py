@@ -1,8 +1,9 @@
 """SD1.5 出图档位与显存预算（app/engine/image/plan.py）的离线单元测试。
 
-2026-11-09 重新选型后图片改走 Wan2.1 单帧（wan-t2i / wan-i2i），SD1.5 引擎与
-plan.py / hires.py 仍在盘上但不再注册；这份测试保留的价值是钉住这两个模块自身的
-几何与预算规则不变——哪天它们被复用或被删，这里都会先红给看。
+2026-11-10 文生图换成 Sana-1.6B 多语言（sana-multiling）、图生图保留 Wan VACE（wan-i2i），
+SD1.5 引擎与 plan.py / hires.py 仍在盘上但不再注册（它是目前唯一实测过峰值显存的出图路径，
+留作后备）。这份测试保留的价值是钉住这两个模块自身的几何与预算规则不变——哪天它们被复用
+或被删，这里都会先红给看；Sana 那一档的几何与像素预算在 test_sana_plan.py 里钉。
 
 旧版还有一整节「三端一致性」：引擎、桌面面板、网页面板各抄一份 PIXEL_SAFE 再互相对拍。
 面板重写成 Wan 480p 档后那些符号（PIXEL_SAFE / ASPECT_CHIPS_IMAGE /
@@ -15,7 +16,7 @@ estimate_hires_tiles / default_mode_params）已随旧档退场，抄写对拍�
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
@@ -26,7 +27,9 @@ from app.engine.image.plan import (
     HIRES_MAX_PIXELS,
     MAX_SIDE,
     MULTIPLE,
+    SD15_PROFILE,
     SINGLE_PASS_MAX_PIXELS,
+    _PROFILES,
     PlanBudgetError,
     ImagePlan,
     resolve_output_plan,
@@ -93,15 +96,20 @@ def test_canvas_beyond_hires_limit_raises(monkeypatch) -> None:
     注意：MAX_SIDE=4096 已经把宽高各自钳住（4096×4096＝16.7MP < 25MP），所以按默认
     常量这条分支走不到；这里把上限临时压低来钉住「越线必抛 PlanBudgetError」这个行为，
     顺带确认默认常量本身没有把可用档位一起否掉。
+
+    2026-11-10 换型之后判断走的是 SD15_PROFILE 里的数字（Sana 那档另有自己的常量，
+    所以预算不再是函数里直接读全局常量），要临时压低上限就得改这张 profile 表本身，
+    只 monkeypatch HIRES_MAX_PIXELS 已经影响不到 resolve_output_plan 了。
     """
     assert MAX_SIDE * MAX_SIDE < HIRES_MAX_PIXELS
     plan = resolve_output_plan(4096, 4096)  # 钳到 MAX_SIDE 后仍能走重绘
     assert plan.use_hires is True
     assert (plan.target_width, plan.target_height) == (4096, 4096)
 
-    monkeypatch.setattr("app.engine.image.plan.HIRES_MAX_PIXELS", 10_000)
+    capped = replace(SD15_PROFILE, max_target_pixels=10_000)
+    monkeypatch.setitem(_PROFILES, "sd15", capped)
     with pytest.raises(PlanBudgetError) as caught:
-        resolve_output_plan(1920, 1080)
+        resolve_output_plan(1920, 1080, profile="sd15")
     assert "超过高清重绘上限" in str(caught.value)
 
 

@@ -1,4 +1,4 @@
-﻿# run_web.ps1 —— 启动「辰鹄AI创作中心」网页控制台
+# run_web.ps1 —— 启动「辰鹄AI创作中心」网页控制台
 #
 # 网页端和桌面端必须同时存在：两端共用同一条 SQLite FIFO 任务队列与执行者锁，
 # 起网页端不会影响桌面端，桌面端也不需要先关掉。这里只解决「网页端起不来 / 起不来还不知道为什么」。
@@ -29,7 +29,12 @@ if (-not (Test-Path $Python)) {
 # ---------------------------------------------------------------- 端口取配置里的值
 # 网页端的端口写在 config.json（web_port），默认 127.0.0.1:8765；写死 8765 会在改过端口的机器上
 # 报「端口被占用」，还顺带把别人的服务当成自己。
-$configFile = Join-Path $env:LOCALAPPDATA "ChenguAIStudio\config.json"
+# 应用数据目录可以整体搬家（便携包注入 CHENGUAI_APP_HOME=<包内>\data\apphome）：只认
+# %LOCALAPPDATA% 会在便携包上读错配置，端口、日志全都不对。
+$AppHome = if ($env:CHENGUAI_APP_HOME) { $env:CHENGUAI_APP_HOME } else { Join-Path $env:LOCALAPPDATA "ChenguAIStudio" }
+$configFile = Join-Path $AppHome "config.json"
+# 服务真正在听的端口由网页端自己记在这里（8765 被别的程序占着时它会往后挪一格）。
+$StateFile = Join-Path $AppHome "logs\web-console.port"
 $cfgPort = 8765
 if (Test-Path $configFile) {
     try {
@@ -42,12 +47,27 @@ if (Test-Path $configFile) {
 }
 if ($Port -le 0) { $Port = $cfgPort }
 if (-not $BindHost) { $BindHost = "127.0.0.1" }
-$url = "http://127.0.0.1:$Port/"
 
 function Get-ListenerPids([int]$port) {
     (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
         Select-Object -ExpandProperty OwningProcess -Unique)
 }
+
+# 端口自动挪过格的话，配置里的端口上没人监听、真实端口在别处：先看服务自己记下的地址，
+# 免得把「网页端在 8766 上跑得好好的」报成「网页端没起来」。
+if ($Port -eq $cfgPort -and (Test-Path $StateFile)) {
+    try {
+        $moved = (Get-Content $StateFile -Raw -Encoding UTF8).Trim()
+        $movedPort = [int]($moved.Split(":")[-1])
+        if ($movedPort -ne $Port -and @(Get-ListenerPids $movedPort).Count -gt 0 -and @(Get-ListenerPids $Port).Count -eq 0) {
+            Write-Host "配置里的 $Port 上没人监听，但网页端上次挪到了 $movedPort（$moved）：按这个地址来。"
+            $Port = $movedPort
+        }
+    } catch {
+        Write-Verbose "读不动 $StateFile：$_"
+    }
+}
+$url = "http://127.0.0.1:$Port/"
 
 function Describe-Owner([int]$procId) {
     $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $procId" -ErrorAction SilentlyContinue

@@ -35,6 +35,8 @@ class FeedArea(QScrollArea):
     retryRequested = Signal(str, str)       # task_id, batch_id
     # 手动「另存」：把这份产物复制一份到用户挑的位置（项目内 output\ 那份始终保留）。
     saveRequested = Signal(str, str)        # task_id, batch_id
+    # 卡片上的「▶ 播放」：产物在工具内的播放窗里放（对应网页端灯箱里的播放器）。
+    playRequested = Signal(str, str)        # task_id, batch_id
 
     def __init__(self, tokens: dict[str, str], parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -270,3 +272,4 @@ class FeedArea(QScrollArea):
         tile.cancelRequested.connect(self.cancelRequested)
         tile.retryRequested.connect(lambda tid: self.retryRequested.emit(tid, batch_id))
         tile.saveRequested.connect(lambda tid: self.saveRequested.emit(tid, batch_id))
+        tile.playRequested.connect(lambda tid: self.playRequested.emit(tid, batch_id))

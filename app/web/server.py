@@ -30,12 +30,18 @@ from app.core.hardware import (
 )
 from app.core.logging_setup import configure_logging
 from app.core.paths import AppPaths
+# 档位账（纯标准库，不含 torch）：与引擎 wan.py、前端 app.js 同一份数字，
+# 网页提交前先判定，超预算不让它进队列。
+from app.engine.video.budget import derive_i2v_size, evaluate as budget_evaluate, explain_over
 from app.engine_registration import register_production_engines
 from app.tasks.engine_manager import EngineManager
 from app.tasks.models import TaskRecord, TaskRequest, TaskStatus
 from app.tasks.service import TaskService
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+# /api/health 里的自家标记：桌面端启动时靠它分辨「8765 上是我自己的网页端」还是「别的程序占着端口」，
+# 自家的就不重复起、也绝不代杀，别人家的就让网页端自己往后挪一个端口（web_port_fallback）。
+WEB_SERVICE_ID = "strata-web"
 MAX_BODY_BYTES = 256 * 1024
 # 上传垫图（图生图 / 图生视频）走单独的上限：base64 后最大 12MB（原图约 8MB）。
 MAX_UPLOAD_BYTES = 12 * 1024 * 1024
@@ -455,7 +461,7 @@ class WebApplication:
         if path.startswith("/static/"):
             return self._serve_static(path[len("/static/"):])
         if path == "/api/health":
-            return self._json(200, {"status": "ok", "service": "strata-web"})
+            return self._json(200, {"status": "ok", "service": WEB_SERVICE_ID})
         if path == "/api/engines":
             statuses = self.services.engine_manager.list_statuses()
             return self._json(
@@ -681,6 +687,10 @@ class WebApplication:
         init_image = parameters.get("init_image_path")
         if init_image not in (None, ""):
             parameters["init_image_path"] = self._validate_init_image(init_image)
+        # 6GB 档位预算：超线的组合在进队列之前就用 400 挡下，并把这一档的真实上限
+        # 讲成具体数字。引擎侧（wan.py _enforce_budget）同样会拦，这里是让网页不必
+        # 白排队一次；口径与前端 app.js 顶部的同名常量完全一致。
+        self._check_wan_budget(engine_id, parameters)
         request = TaskRequest(
             task_type=task_type,
             engine_id=engine_id.strip(),
@@ -716,6 +726,30 @@ class WebApplication:
                 + f"；收到的是：{ref_path.name}",
             )
         return str(ref_path)
+
+    def _check_wan_budget(self, engine_id: str, parameters: dict[str, Any]) -> None:
+        """Wan 三个引擎（文生视频 / 图生视频 / 图生图单帧）提交前的 6GB 档位判定。
+
+        图生视频与图生图的目标尺寸按首帧（垫图）比例推算，算法与引擎里那份完全相同，
+        所以提示里的数字就是引擎真会用的那一档，不是猜的。档位钉死：这里不会替用户
+        降分辨率或减帧数，只会把越线的组合挡在队列外，并说清两个方向各自的上限。
+        """
+        if engine_id not in ("wan-t2v", "wan-i2v", "wan-i2i"):
+            return
+        frames = 1 if engine_id == "wan-i2i" else parameters.get("num_frames", 33)
+        width = parameters.get("width", 832)
+        height = parameters.get("height", 480)
+        ref = parameters.get("init_image_path")
+        if engine_id in ("wan-i2v", "wan-i2i") and ref:
+            derived = derive_i2v_size(ref, width, height)
+            width, height = derived["width"], derived["height"]
+        try:
+            report = budget_evaluate(width, height, frames)
+        except (TypeError, ValueError):
+            return  # 参数根本不是数字：让 worker 的白名单校验去报错，这里不抢话
+        if not report["ok"]:
+            label = {"wan-i2v": "图生视频", "wan-i2i": "图生图"}.get(engine_id, "文生视频")
+            raise HttpError(400, explain_over(report, label))
 
     # ------------------------------------------------------------- 上传垫图
 
@@ -1043,6 +1077,65 @@ _REASONS = {
 }
 
 
+def _is_port_conflict(exc: OSError) -> bool:
+    """是不是「端口被人占了」这一类错误（Windows 10048/10049，POSIX 98/99）。"""
+    return getattr(exc, "winerror", None) in (10048, 10049) or getattr(exc, "errno", None) in (98, 99)
+
+
+def _write_effective_port(port_file: Path, host: str, port: int, logger) -> None:
+    """把网页端真正在听的那个端口写下来，给 scripts\\run_web.ps1 找地址用。"""
+    try:
+        port_file.parent.mkdir(parents=True, exist_ok=True)
+        port_file.write_text(f"{host}:{port}\n", encoding="utf-8")
+    except OSError as exc:  # noqa: BLE001 - 记不上不影响服务能用，只是脚本找不到地址
+        logger.warning("写 web-console.port 失败（脚本可能找不到网页端地址）：%s", exc)
+
+
+async def _bind_http(
+    protocol: "_HttpServerProtocol",
+    host: str,
+    port: int,
+    logger,
+    allow_fallback: bool,
+    port_file: Path,
+) -> tuple[asyncio.Server, int]:
+    """按配置端口绑；被别人占了就往后挪一格（最多五格），而不是直接启动失败。
+
+    网页端和桌面端本来就不该抢同一个端口：桌面端是 Qt 窗口，它自己不监听任何端口，
+    会撞上的只有「别的程序已经占着 8765」。真撞上了不退出，挪一格继续跑，并把真实端口
+    写进 logs\\web-console.port，浏览器要打开的地址以它为准。
+    """
+    attempts = tuple(range(port, port + 6)) if allow_fallback else (port,)
+    last_exc: OSError | None = None
+    for candidate in attempts:
+        try:
+            server = await asyncio.start_server(protocol.serve, host, candidate)
+        except OSError as exc:
+            if not _is_port_conflict(exc):
+                raise
+            last_exc = exc
+            if candidate == port:
+                logger.warning(
+                    "%s:%d 已经被别的程序占着，网页端%s",
+                    host,
+                    candidate,
+                    "往后挪一个端口再试" if allow_fallback else "按 web_port_fallback=false 的配置不再换端口",
+                )
+            continue
+        if candidate != port:
+            logger.warning(
+                "网页端用的是 %d 而不是配置里的 %d（那个端口被别的程序占着）：浏览器请打开 http://%s:%d",
+                candidate,
+                port,
+                host,
+                candidate,
+            )
+        _write_effective_port(port_file, host, candidate, logger)
+        return server, candidate
+    assert last_exc is not None
+    raise last_exc
+
+
 async def run_web_server(
     services: WebServices | None = None,
     host: str | None = None,
@@ -1054,6 +1147,18 @@ async def run_web_server(
     host = host or str(services.config.get("web_host", "127.0.0.1"))
     port = port or int(services.config.get("web_port", 8765))
 
+    protocol = _HttpServerProtocol(app_obj, services.logger)
+    # 先把端口绑上再起 worker：端口都不通就白起一遍任务后台，还可能带出引擎子进程。
+    server, port = await _bind_http(
+        protocol,
+        host,
+        port,
+        services.logger,
+        bool(services.config.get("web_port_fallback", True)),
+        services.paths.log_file.parent / "web-console.port",
+    )
+    services.logger.info("辰鹄AI创作中心 Web 服务已启动：http://%s:%d", host, port)
+
     await services.task_service.start()
     # 启动清扫：上一代客户端被强行结束（或被杀）时留下的 llama-server 孤儿先收掉。
     # 只认镜像名 llama-server.exe 且父进程已经不在了的那些——别人家的程序一个都不碰。
@@ -1061,9 +1166,6 @@ async def run_web_server(
         await asyncio.to_thread(app_obj.agent.sweep_orphan_llm)
     except Exception as exc:  # noqa: BLE001 - 清扫失败不影响网页端本身能用
         services.logger.warning("启动清扫大模型孤儿进程失败：%s", exc)
-    protocol = _HttpServerProtocol(app_obj, services.logger)
-    server = await asyncio.start_server(protocol.serve, host, port)
-    services.logger.info("辰鹄AI创作中心 Web 服务已启动：http://%s:%d", host, port)
     try:
         async with server:
             await server.serve_forever()
@@ -1087,12 +1189,12 @@ def main() -> int:
         print("已收到退出信号，服务已停止。")
     except OSError as exc:
         # 端口被占用是「网页端打不开」最常见的样子：给可执行的下一步，而不是甩堆栈。
-        if getattr(exc, "winerror", None) in (10048, 10049) or exc.errno in (98, 99):
+        if _is_port_conflict(exc):
             print(
-                "网页控制台启动失败：端口已被占用，说明已经有一个网页端在跑。\n"
-                "  · 想直接用：浏览器打开 http://127.0.0.1:8765 （端口可在 config.json 的 web_port 改）；\n"
+                "网页控制台启动失败：配置里的端口连着换五个都被人占着（或者 web_port_fallback 被设成了 false）。\n"
+                "  · 已经有一个网页端在跑：浏览器直接打开日志里写的那个地址（默认 http://127.0.0.1:8765）；\n"
                 "  · 想用新代码重启：powershell -NoProfile -File scripts\\run_web.ps1 -Restart；\n"
-                "  · 想换端口：改 config.json 的 web_port 后重新启动。\n"
+                "  · 想换端口：改 config.json 的 web_port 后重新启动（默认 8765）。\n"
                 f"原始错误：{exc}"
             )
             return 3

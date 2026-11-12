@@ -39,9 +39,14 @@ def test_router_image_command_reads_aspect_ratio() -> None:
     command = parse_command("画一张赛博朋克雨夜街头，16:9")
     assert command.action == ACTION_GENERATE
     assert command.mode == "t2i"
-    # 图片与视频同一份 480p 像素预算（router._ASPECT_VIDEOS == wan 面板档位）：16:9 → 832×480。
-    assert command.parameters["width"] == 832
-    assert command.parameters["height"] == 480
+    # 文生图（sana-multiling）走 1024 级档：16:9 → 1152×640，与 router._ASPECT_SANA
+    # 同一份口径（32 的倍数、单遍预算 1_100_000px），不再压到 480p 档。
+    from app.agent.router import _ASPECT_SANA
+
+    assert (command.parameters["width"], command.parameters["height"]) == _ASPECT_SANA["16:9"]
+    assert command.parameters["width"] == 1152
+    assert command.parameters["height"] == 640
+    assert command.parameters["width"] % 32 == 0 and command.parameters["height"] % 32 == 0
 
 
 def test_router_portrait_wallpaper_and_seed() -> None:
@@ -693,12 +698,15 @@ def test_agent_capability_lists_every_slot_on_both_ends() -> None:
     assert "已注册未启动不等于没有引擎" in app_js
     # 图生图绑到自己的引擎槽，两端都不能沿用文生图引擎（否则两个模型同时进显存）
     assert 'i2i:["wan-i2i"]' in app_js.replace(" ", "")
-    assert 't2i:["wan-t2i"]' in app_js.replace(" ", "")
+    # 2026-11-10 换型：文生图 = Sana-1.6B 多语言版（wan-t2i 已下架，网页端不得再出现它）
+    assert 't2i:["sana-multiling"]' in app_js.replace(" ", "")
+    assert "wan-t2i" not in app_js, "网页端还残留已下架的 wan-t2i，两端引擎清单不一致"
     from app.ui.widgets.param_panel import MODE_ENGINE_ALLOW
 
-    assert MODE_ENGINE_ALLOW["t2i"] == ("wan-t2i",)
+    assert MODE_ENGINE_ALLOW["t2i"] == ("sana-multiling",)
     assert MODE_ENGINE_ALLOW["i2i"] == ("wan-i2i",)
     assert '"i2i":("wan-i2i",)' in panel_js.replace(" ", "").replace("'", '"')
+    assert '"t2i":("sana-multiling",)' in panel_js.replace(" ", "").replace("'", '"')
 
     # 网页端「产物保存」面板的元素 id 必须与 app.js 用的一致，否则面板空白
     for element_id in ("output-dir-label", "project-output-label", "autosave-dir", "autosave-state"):
@@ -713,6 +721,11 @@ def test_image_and_image_to_image_use_distinct_engine_slots() -> None:
     assert agent_service._ENGINE_CANDIDATES["t2i"] != agent_service._ENGINE_CANDIDATES["i2i"]
     assert "wan-i2i" in agent_service._ENGINE_CANDIDATES["i2i"]
     assert "wan-i2i" not in agent_service._ENGINE_CANDIDATES["t2i"]
+    # 文生图槽位指向 Sana（wan-t2i 已下架）；关键字兜底也必须换成 "sana"，
+    # 否则注册表里 id 一变，兜底匹配就拿不到引擎了。
+    assert "sana-multiling" in agent_service._ENGINE_CANDIDATES["t2i"]
+    assert "wan-t2i" not in agent_service._ENGINE_CANDIDATES["t2i"]
+    assert "sana" in agent_service._ENGINE_KEYWORDS["t2i"]
 
 
 def test_config_keeps_llm_timeout_seconds(tmp_path) -> None:
@@ -729,7 +742,7 @@ def test_config_keeps_llm_timeout_seconds(tmp_path) -> None:
 
 # ------------------------------------------------ 排生成前先让模型交还显存
 class _FakeEngineManager:
-    def __init__(self, engine_ids: tuple[str, ...] = ("wan-t2i",)) -> None:
+    def __init__(self, engine_ids: tuple[str, ...] = ("sana-multiling",)) -> None:
         self._engine_ids = engine_ids
 
     def list_statuses(self):
@@ -774,7 +787,7 @@ def test_agent_asks_llm_to_free_vram_before_queueing() -> None:
     assert "交还显存" in result["reply"]
 
 
-def _agent_with_fake_llm(events: list[str], engine_ids: tuple[str, ...] = ("wan-t2i",)) -> AgentService:
+def _agent_with_fake_llm(events: list[str], engine_ids: tuple[str, ...] = ("sana-multiling",)) -> AgentService:
     """把智能体接到替身上：大模型只留一个 unload 探针，绝不真发请求。"""
     service = AgentService(
         task_service=_FakeTaskService(events),
@@ -789,19 +802,19 @@ def _agent_with_fake_llm(events: list[str], engine_ids: tuple[str, ...] = ("wan-
 
 
 def test_agent_image_command_queues_single_task() -> None:
-    """图片换到 Wan 单帧档后智能体一次只排 1 条：旧 SD1.5「说一句出 4 张」随引擎退场。"""
+    """文生图走 Sana（sana-multiling）：智能体一次只排 1 条，旧 SD1.5「说一句出 4 张」随引擎退场。"""
     events: list[str] = []
     service = _agent_with_fake_llm(events)
     result = service.handle("画一张赛博朋克雨夜街头，16:9")
     assert events.count("submit") == 1, events
     assert len(result["tasks"]) == 1
     assert result["tasks"][0]["task_type"] == "image"
-    assert result["tasks"][0]["engine_id"] == "wan-t2i"
+    assert result["tasks"][0]["engine_id"] == "sana-multiling"
     assert "已排入队列" in result["reply"]
 
 
 def test_agent_image_command_with_locked_seed_uses_that_seed() -> None:
-    """话里给了种子＝锁定：这条任务直接用该 seed（Wan 单帧一次 1 张，连号已无意义）。"""
+    """话里给了种子＝锁定：这条任务直接用该 seed（Sana 一次 1 张，连号已无意义）。"""
     events: list[str] = []
     service = _agent_with_fake_llm(events)
     result = service.handle("画一只柴犬，种子 123")
@@ -812,7 +825,7 @@ def test_agent_image_command_with_locked_seed_uses_that_seed() -> None:
 def test_agent_video_and_music_stay_single_task() -> None:
     """一次 4 张只属于图片通道：视频、音乐仍然一条任务（时长/成本都不允许批量）。"""
     events: list[str] = []
-    service = _agent_with_fake_llm(events, ("wan-t2i", "wan-t2v", "ace-step-15"))
+    service = _agent_with_fake_llm(events, ("sana-multiling", "wan-t2v", "ace-step-15"))
     video = service.handle("生成一段10秒的海浪拍打礁石延时摄影")
     assert events.count("submit") == 1, events
     assert len(video["tasks"]) == 1

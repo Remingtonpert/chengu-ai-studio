@@ -26,20 +26,19 @@ from PySide6.QtWidgets import (
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
 PLACEHOLDERS = {
-    "t2i": "发出想象…　Enter 生成 4 图网格 · Shift+Enter 换行",
-    "i2i": "先放垫图（选择/拖入/粘贴），再描述想要的变化…",
-    "t2v": "描述动态画面…（Wan2.1-T2V-1.3B · 16fps mp4）",
-    "i2v": "先放首帧图片，再描述画面如何运动…",
-    "music": (
-        "描述音乐：风格、情绪、乐器、节奏…（ACE-Step 1.5：支持 4-10 分钟带人声完整乐曲）"
-    ),
+    # 与网页端 app.js:PLACEHOLDERS 逐字一致（改一处必须同步另一处与 i18n 词典）。
+    "t2i": "描述你想要的画面…（Sana-1.6B 多语言版 · 中文英文混着写都行 · 1024 级直出，可到 1080p）",
+    "i2i": "先放参考图，再描述想改成什么样…（Wan2.1-VACE-1.3B 按垫图参考重绘）",
+    "t2v": "描述动态画面…（Wan2.1-T2V-1.3B · 16fps mp4 · 最高约 480p）",
+    "i2v": "先放首帧图片，再描述画面如何运动…（Wan2.1-I2V-1.3B · 16fps mp4）",
+    "music": "描述音乐：风格、情绪、乐器、节奏…（ACE-Step 1.5 · 10-480 秒 · 可带中文/英文人声）",
 }
 REF_NOTE = {
     "video": "该文件将作为 init_image_path 首帧，视频从它开始运动",
-    "image": "强度用右侧「重绘强度」滑块调节（默认 0.6）",
+    "image": "垫图只作参考重绘的参照，改动幅度由提示词决定（图生图引擎没有「重绘强度」这个参数）",
 }
 REF_ZONE_NOTE = "也可以把本机图片拖到这里 / Ctrl+V 粘贴 · 路径自动预填"
-PATH_PLACEHOLDER = "参考图的本机完整路径（绝对路径），如 D:\\ChenguAI\\uploads\\photo.png"
+PATH_PLACEHOLDER = "参考图的本机完整路径（绝对路径、具体图片文件），如 D:\\ChenguAI\\uploads\\photo.png"
 
 
 class PromptBox(QPlainTextEdit):

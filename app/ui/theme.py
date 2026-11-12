@@ -273,6 +273,12 @@ def build_stylesheet(dark: bool, mode: str | None = None) -> str:
         f"QPushButton#playBtn {{ background: {p['accent']}; color: {p['accent_ink']}; border: 0; border-radius: 14px;",
         " min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px; font-size: 12px; }",
         f"QLabel#playTime {{ font-size: 11px; color: {p['text_dim']}; }}",
+        # ------------------------------------------------- 工具内播放窗（视频/音频）
+        f"QDialog#mediaPlayer {{ background: {p['bg']}; }}",
+        f"QLabel#mediaIcon {{ font-size: 26px; color: {p['text_mid']}; }}",
+        f"QVideoWidget#mediaVideo {{ background: #000; border: 1px solid {p['line']};",
+        f" border-radius: {p['radius_sm']}; }}",
+        f"QSlider#volumeSlider {{ min-width: 90px; }}",
         # ---------------------------------------------------------- lightbox
         f"QDialog#lightbox {{ background: #050607e0; }}",
         f"QLabel#lbImage {{ background: {p['bg_card']}; border: 1px solid {p['line']}; border-radius: {p['radius']}; }}",

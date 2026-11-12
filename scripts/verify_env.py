@@ -29,13 +29,19 @@ def check_pytorch():
 
 
 def check_diffusers():
-    """检查 diffusers"""
+    """检查 diffusers（现役文生图走 SanaPipeline + AutoencoderDC；SD1.5 管线只作后备检查）"""
     print("\n🔍 检查 diffusers...")
     try:
         import diffusers
-        from diffusers import StableDiffusionPipeline
+        from diffusers import SanaPipeline, AutoencoderDC
         print(f"   ✅ diffusers {diffusers.__version__}")
-        print(f"   - StableDiffusionPipeline 可用：{StableDiffusionPipeline is not None}")
+        print(f"   - SanaPipeline / AutoencoderDC 可用：{SanaPipeline is not None and AutoencoderDC is not None}")
+        try:
+            import sentencepiece  # noqa: F401  Gemma tokenizer 需要，缺了 Sana 编码器起不来
+            print("   - sentencepiece 可用：True")
+        except Exception as exc:  # noqa: BLE001
+            print(f"   - sentencepiece 缺失：{exc}（文生图引擎会加载不了文本编码器，请 pip install sentencepiece）")
+            return False
         return True
     except Exception as e:
         print(f"   ❌ diffusers 安装失败：{e}")
@@ -159,9 +165,11 @@ def main():
     missing = [name for name, ok in required if not ok]
     print(f"\n⚠️  缺少以下必需组件：{', '.join(missing)}")
     print("\n本项目实际使用的安装命令（CUDA 13.0 轮子，按引擎分别装）:")
-    print("# 图片引擎（SD1.5 + RealVis V5.1 + LCM-LoRA）")
+    print("# 图片引擎（Sana-1.6B 多语言版，引擎 sana-multiling；推荐直接用一键脚本 scripts\\setup_image_venv.ps1）")
     print(r'  .\.venv-image\Scripts\python.exe -m pip install torch==2.14.1+cu130 --index-url https://download.pytorch.org/whl/cu130')
-    print(r'  .\.venv-image\Scripts\python.exe -m pip install "diffusers==0.41.0" "transformers==5.19.0" accelerate peft safetensors Pillow huggingface-hub')
+    print(r'  .\.venv-image\Scripts\python.exe -m pip install "diffusers==0.41.0" "transformers==5.19.0" "accelerate==1.15.0" "safetensors==0.8.0" "huggingface-hub==1.33.0" "sentencepiece>=0.2" "Pillow>=10"')
+    print(r'  # 权重：python scripts\download_sana_weights.py（走 hf-mirror，落到 models\sana-multiling，约 9.06GB，只含 fp16 变体）')
+    print(r'  # 后备（未注册、不上架，只留代码）：SD1.5 需要额外 peft；打包脚本故意不带这三件套')
     print("# 视频引擎（Wan2.1 1.3B T2V / VACE）")
     print(r'  .\.venv-video\Scripts\python.exe -m pip install torch==2.14.1+cu130 torchvision==0.29.1+cu130 torchaudio==2.11.0+cu130 --index-url https://download.pytorch.org/whl/cu130')
     print(r'  .\.venv-video\Scripts\python.exe -m pip install "diffusers==0.41.0" "transformers==5.19.0" accelerate safetensors Pillow huggingface-hub imageio-ffmpeg')
